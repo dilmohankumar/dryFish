@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Navbar from "../components/layout/Navbar/navbar.jsx";
 import Footer from "../components/layout/Footer/footer.jsx";
 import Home from "../pages/home.jsx";
@@ -6,12 +6,37 @@ import Sidebar from "../components/layout/sidebar/sidebar.jsx";
 import ProductDetail from "../pages/productDetails.jsx";
 
 function App() {
-  const [selectedSort, setSelectedSort] = useState(null);
-  const [selectedCats, setSelectedCats] = useState([]);
+  // ── Filter state (from Sidebar) ──────────────────────────────────────────
+  const [selectedSort, setSelectedSort]       = useState(null);
+  const [selectedCats, setSelectedCats]       = useState([]);
   const [selectedOrigins, setSelectedOrigins] = useState([]);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null); // null = home
+  const [sidebarOpen, setSidebarOpen]         = useState(false);
+
+  // ── Routing: null = home, object = product detail page ───────────────────
+  const [selectedProduct, setSelectedProduct] = useState(null);
+
+  // ── Global cart state: { [productId]: qty } ──────────────────────────────
   const [cart, setCart] = useState({});
+
+  // Cart operations
+  const cartInc = useCallback((id) => {
+    setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  }, []);
+
+  const cartDec = useCallback((id) => {
+    setCart(c => {
+      const n = (c[id] || 1) - 1;
+      return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n };
+    });
+  }, []);
+
+  const cartFirstAdd = useCallback((id) => {
+    setCart(c => ({ ...c, [id]: 1 }));
+  }, []);
+
+  const cartRemove = useCallback((id) => {
+    setCart(c => ({ ...c, [id]: 0 }));
+  }, []);
 
   const handleClearAll = () => {
     setSelectedSort(null);
@@ -19,31 +44,34 @@ function App() {
     setSelectedOrigins([]);
   };
 
-  const handleAddToCart = (productId, variantLabel, qty) => {
-    const key = `${productId}-${variantLabel}`;
-    setCart(c => ({ ...c, [key]: qty }));
-  };
-
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
+
+      {/* ── Navbar (always visible, carries cart state) ── */}
       <Navbar
         onOpenSidebar={() => setSidebarOpen(true)}
         cart={cart}
+        onCartInc={cartInc}
+        onCartDec={cartDec}
+        onCartRemove={cartRemove}
         onLogoClick={() => setSelectedProduct(null)}
       />
 
       {selectedProduct ? (
-        /* ── Product Detail — full width, no sidebar ── */
+        // ── Product Detail page (full width, no sidebar) ──────────────────
         <div className="flex-1">
           <ProductDetail
             product={selectedProduct}
             onBack={() => setSelectedProduct(null)}
-            onAddToCart={handleAddToCart}
+            cart={cart}
+            onCartInc={cartInc}
+            onCartDec={cartDec}
+            onCartFirstAdd={cartFirstAdd}
           />
         </div>
       ) : (
-        /* ── Home + Sidebar ── */
-        <div className="flex flex-1 max-w-7xl w-full mx-auto px-6 py-6 gap-8">
+        // ── Home + Sidebar ────────────────────────────────────────────────
+        <div className="flex flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-6 sm:gap-8">
           <Sidebar
             open={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
@@ -62,7 +90,10 @@ function App() {
               selectedOrigins={selectedOrigins}
               cart={cart}
               onProductClick={setSelectedProduct}
-              onAddToCart={handleAddToCart}
+              onInc={cartInc}
+              onDec={cartDec}
+              onFirstAdd={cartFirstAdd}
+              onOpenSidebar={() => setSidebarOpen(true)}
             />
           </main>
         </div>
