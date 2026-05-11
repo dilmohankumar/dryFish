@@ -4,50 +4,27 @@ import Footer from "../components/layout/Footer/footer.jsx";
 import Home from "../pages/home.jsx";
 import Sidebar from "../components/layout/sidebar/sidebar.jsx";
 import ProductDetail from "../pages/productDetails.jsx";
+import Login from "../pages/auth/login.jsx";
+import Signup from "../pages/auth/signup.jsx";
+import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 
-function App() {
-  // ── Filter state (from Sidebar) ──────────────────────────────────────────
-  const [selectedSort, setSelectedSort]       = useState(null);
-  const [selectedCats, setSelectedCats]       = useState([]);
+// ─ Store layout (Navbar + Sidebar + Home/Detail + Footer) ─  
+function StoreLayout({ user, onLogout, onLoginClick }) {
+  const [selectedSort, setSelectedSort] = useState(null);
+  const [selectedCats, setSelectedCats] = useState([]);
   const [selectedOrigins, setSelectedOrigins] = useState([]);
-  const [sidebarOpen, setSidebarOpen]         = useState(false);
-
-  // ── Routing: null = home, object = product detail page ───────────────────
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-
-  // ── Global cart state: { [productId]: qty } ──────────────────────────────
   const [cart, setCart] = useState({});
 
-  // Cart operations
-  const cartInc = useCallback((id) => {
-    setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
-  }, []);
-
-  const cartDec = useCallback((id) => {
-    setCart(c => {
-      const n = (c[id] || 1) - 1;
-      return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n };
-    });
-  }, []);
-
-  const cartFirstAdd = useCallback((id) => {
-    setCart(c => ({ ...c, [id]: 1 }));
-  }, []);
-
-  const cartRemove = useCallback((id) => {
-    setCart(c => ({ ...c, [id]: 0 }));
-  }, []);
-
-  const handleClearAll = () => {
-    setSelectedSort(null);
-    setSelectedCats([]);
-    setSelectedOrigins([]);
-  };
+  const cartInc = useCallback(id => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })), []);
+  const cartDec = useCallback(id => setCart(c => { const n = (c[id] || 1) - 1; return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n }; }), []);
+  const cartFirstAdd = useCallback(id => setCart(c => ({ ...c, [id]: 1 })), []);
+  const cartRemove = useCallback(id => setCart(c => ({ ...c, [id]: 0 })), []);
+  const clearFilters = () => { setSelectedSort(null); setSelectedCats([]); setSelectedOrigins([]); };
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
-
-      {/* ── Navbar (always visible, carries cart state) ── */}
       <Navbar
         onOpenSidebar={() => setSidebarOpen(true)}
         cart={cart}
@@ -55,10 +32,12 @@ function App() {
         onCartDec={cartDec}
         onCartRemove={cartRemove}
         onLogoClick={() => setSelectedProduct(null)}
+        user={user}
+        onLoginClick={onLoginClick}
+        onLogout={onLogout}
       />
 
       {selectedProduct ? (
-        // ── Product Detail page (full width, no sidebar) ──────────────────
         <div className="flex-1">
           <ProductDetail
             product={selectedProduct}
@@ -70,8 +49,7 @@ function App() {
           />
         </div>
       ) : (
-        // ── Home + Sidebar ────────────────────────────────────────────────
-        <div className="flex flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-6 sm:gap-8">
+        <div className="flex flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-5 sm:gap-8">
           <Sidebar
             open={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
@@ -81,7 +59,7 @@ function App() {
             onCatChange={setSelectedCats}
             selectedOrigins={selectedOrigins}
             onOriginChange={setSelectedOrigins}
-            onClearAll={handleClearAll}
+            onClearAll={clearFilters}
           />
           <main className="flex-1 min-w-0">
             <Home
@@ -104,4 +82,57 @@ function App() {
   );
 }
 
-export default App;
+// ── App ────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [user, setUser] = useState(null);
+  const navigate = useNavigate();
+
+  const handleLoginSuccess = (userData) => {
+    setUser(userData);
+    navigate("/", { replace: true });
+  };
+
+  const handleSignupSuccess = (userData) => {
+    setUser(userData);
+    navigate("/", { replace: true });
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    navigate("/login", { replace: true });
+  };
+
+  return (
+    <Routes>
+      {/* Auth pages — no navbar/footer */}
+      <Route
+        path="/login"
+        element={
+          user
+            ? <Navigate to="/" replace />
+            : <Login onLoginSuccess={handleLoginSuccess} onGoToSignup={() => navigate("/signup")} />
+        }
+      />
+      <Route
+        path="/signup"
+        element={
+          user
+            ? <Navigate to="/" replace />
+            : <Signup onSignupSuccess={handleSignupSuccess} onGoToLogin={() => navigate("/login")} />
+        }
+      />
+
+      {/* Main store — all other paths */}
+      <Route
+        path="/*"
+        element={
+          <StoreLayout
+            user={user}
+            onLogout={handleLogout}
+            onLoginClick={() => navigate("/login")}
+          />
+        }
+      />
+    </Routes>
+  );
+}
