@@ -1,13 +1,14 @@
 // src/hooks/useRazorpay.js
 // ─────────────────────────────────────────────────────────────────────────────
-// Production-grade Razorpay integration hook
+// Razorpay integration with AUTH GUARD
+// If df_token not in localStorage → calls onAuthRequired (redirect to /login)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { toast } from "sonner";
+
 const RAZORPAY_KEY =
   import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_XXXXXXXXXXXXXXXX";
 
-// Dynamically load Razorpay SDK (avoids blocking page load)
 function loadRazorpayScript() {
   return new Promise((resolve) => {
     if (window.Razorpay) return resolve(true);
@@ -20,13 +21,12 @@ function loadRazorpayScript() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// openRazorpay({ product, variant, qty, onSuccess, onFailure })
-//
-// product  — full product object
-// variant  — { label, price, mrp }
-// qty      — number
-// onSuccess(paymentId) — called after successful payment
-// onFailure(error)     — called on failure / dismiss
+// openRazorpay({
+//   product, variant, qty,
+//   onSuccess, onFailure,
+//   onAuthRequired,     ← NEW: called when user is not logged in
+//   customDescription,
+// })
 // ─────────────────────────────────────────────────────────────────────────────
 export async function openRazorpay({
   product,
@@ -34,49 +34,70 @@ export async function openRazorpay({
   qty = 1,
   onSuccess,
   onFailure,
+  onAuthRequired,       // ← redirect to /login
+  customDescription,
 }) {
+  // ── AUTH GUARD — check df_token ─────────────────────────────────────────
+  const token = localStorage.getItem("df_token");
+  if (!token) {
+    // Not logged in → redirect to login
+    toast.error("Please login to continue with payment");
+    if (onAuthRequired) {
+      onAuthRequired();   // caller handles navigate("/login")
+    } else {
+      window.location.href = "/login"; // fallback
+    }
+    return; // stop — do NOT open Razorpay
+  }
+
+  // ── Load SDK ────────────────────────────────────────────────────────────
   const loaded = await loadRazorpayScript();
   if (!loaded) {
-    toast.error(
-      "Failed to load payment gateway. Please check your internet connection.",
-    );
+    toast.error("Failed to load payment gateway. Please check your internet connection.");
     return;
   }
 
-  const totalPaise = variant.price * qty * 100; // Razorpay expects paise
+  const totalPaise = variant.price * qty * 100;
 
-  // In production: call YOUR backend here to create an order and get order_id
+  // In production: call backend to create order and get order_id
   // const { order_id } = await fetch("/api/orders/create", {
   //   method: "POST",
+  //   headers: {
+  //     "Content-Type": "application/json",
+  //     Authorization: `Bearer ${token}`,
+  //   },
   //   body: JSON.stringify({ amount: totalPaise, product_id: product.id, qty }),
   // }).then(r => r.json());
+
+  // Pre-fill from cached user
+  const cachedUser = (() => {
+    try { return JSON.parse(localStorage.getItem("df_user") || "{}"); }
+    catch { return {}; }
+  })();
 
   const options = {
     key: RAZORPAY_KEY,
     amount: totalPaise,
     currency: "INR",
     name: "dryfish.co",
-    description: `${product.name} — ${variant.label} × ${qty}`,
-    image: "https://dryfish.co/logo.png", // replace with your logo URL
-
+    description: customDescription || `${product.name} — ${variant.label} × ${qty}`,
+    image: "/logo.png",
     // order_id,  // ← uncomment when backend is ready
 
     prefill: {
-      name: "", // pre-fill from user profile if available
-      email: "",
-      contact: "",
+      name:    cachedUser.name    || "",
+      email:   cachedUser.email   || "",
+      contact: cachedUser.phone   || "",
     },
 
     notes: {
-      product_id: product.id,
+      product_id:   product.id,
       product_name: product.name,
-      variant: variant.label,
-      quantity: qty,
+      variant:      variant.label,
+      quantity:     qty,
     },
 
-    theme: {
-      color: "#1A3A5C",
-    },
+    theme: { color: "#1A3A5C" },
 
     modal: {
       ondismiss: () => {
@@ -85,19 +106,20 @@ export async function openRazorpay({
     },
 
     handler: function (response) {
-      // response = { razorpay_payment_id, razorpay_order_id, razorpay_signature }
-      // In production: verify signature on YOUR backend before fulfilling order
-      // fetch("/api/orders/verify", { method: "POST", body: JSON.stringify(response) })
+      // In production: verify signature on backend before fulfilling order
+      // fetch("/api/orders/verify", {
+      //   method: "POST",
+      //   headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      //   body: JSON.stringify(response),
+      // });
       if (onSuccess) onSuccess(response.razorpay_payment_id);
     },
   };
 
   const rzp = new window.Razorpay(options);
-
-  rzp.on("payment.failed", function (response) {
+  rzp.on("payment.failed", (response) => {
     if (onFailure) onFailure(response.error);
   });
-
   rzp.open();
 }
 

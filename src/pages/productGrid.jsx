@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { openRazorpay } from "../hooks/useRazorpay.js";
 
+
 // ── Icons ──────────────────────────────────────────────────────────────────
 const PlusIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -15,6 +16,11 @@ const MinusIcon = () => (
 const BuyIcon = () => (
   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+  </svg>
+);
+const LockIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
   </svg>
 );
 const StarIcon = ({ filled }) => (
@@ -56,33 +62,45 @@ export const PRODUCTS = [
 
 const discountPct = (p, m) => Math.round(((m - p) / m) * 100);
 
-// ── Global toast (singleton — only one shown at a time) ───────────────────
+// ── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ toast, onClose }) {
   if (!toast) return null;
   return (
-    <div className={`fixed bottom-5 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 px-4 sm:px-5 py-3 rounded-2xl shadow-2xl text-xs sm:text-sm font-semibold animate-bounce-in
-      ${toast.type === "success" ? "bg-green-600 text-white" : "bg-red-500 text-white"}`}
-      style={{ animation: "slideUp .25s ease" }}
+    <div
+      className={`fixed bottom-5 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 px-4 sm:px-5 py-3 rounded-2xl shadow-2xl text-xs sm:text-sm font-semibold`}
+      style={{ animation: "slideUp .25s ease",
+        background: toast.type === "success" ? "#16a34a" : toast.type === "auth" ? "#1A3A5C" : "#ef4444",
+        color: "white" }}
     >
-      <span className="text-base">{toast.type === "success" ? "✓" : "✕"}</span>
-      <span className="max-w-[260px] truncate">{toast.message}</span>
+      <span>{toast.type === "success" ? "✓" : toast.type === "auth" ? "🔒" : "✕"}</span>
+      <span className="max-w-[240px]">{toast.message}</span>
       <button onClick={onClose} className="ml-1 opacity-60 hover:opacity-100 text-xs font-bold">✕</button>
     </div>
   );
 }
 
-// ── useBuyFlow ─────────────────────────────────────────────────────────────
-function useBuyFlow(product, onToast) {
+// ── useBuyFlow — now accepts onAuthRequired ────────────────────────────────
+function useBuyFlow(product, onToast, onAuthRequired) {
   const [status, setStatus] = useState("idle");
 
   const triggerBuy = useCallback(async (variant, qty) => {
     if (status === "paying") return;
+
+    // ── AUTH CHECK (instant, before any async work) ─────────────────────
+    const token = localStorage.getItem("df_token");
+    if (!token) {
+      onToast({ message: "Please login to continue with payment", type: "auth" });
+      if (onAuthRequired) onAuthRequired(); // navigate("/login")
+      return;
+    }
+
     setStatus("paying");
     try {
       await openRazorpay({
         product,
         variant,
         qty,
+        onAuthRequired, // also pass so useRazorpay can guard too
         onSuccess: (paymentId) => {
           setStatus("success");
           onToast({
@@ -104,26 +122,29 @@ function useBuyFlow(product, onToast) {
     } catch {
       setStatus("idle");
     }
-  }, [product, status, onToast]);
+  }, [product, status, onToast, onAuthRequired]);
 
   return { status, triggerBuy };
 }
 
 // ── Product Card ───────────────────────────────────────────────────────────
-function ProductCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick, onToast }) {
-  const variant = product.variants[0];
-  const { status, triggerBuy } = useBuyFlow(product, onToast);
+function ProductCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick, onToast, onAuthRequired }) {
+  const variant   = product.variants[0];
+  const { status, triggerBuy } = useBuyFlow(product, onToast, onAuthRequired);
   const isPaying  = status === "paying";
   const isSuccess = status === "success";
   const hasItems  = qty > 0;
   const total     = variant.price * (qty || 1);
+
+  // ── Buy button label — shows 🔒 Login to Buy when not logged in ──────
+  const isLoggedIn = !!localStorage.getItem("df_token");
 
   return (
     <div
       className="bg-white rounded-xl sm:rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-all duration-200 flex flex-col group cursor-pointer"
       onClick={() => onCardClick(product)}
     >
-      {/* ── Image ── */}
+      {/* Image */}
       <div className="relative overflow-hidden flex-shrink-0" style={{ background: product.bg, height: 160 }}>
         <div className="absolute inset-0 flex items-center justify-center text-6xl sm:text-7xl select-none group-hover:scale-110 transition-transform duration-300">
           {product.emoji}
@@ -140,7 +161,7 @@ function ProductCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick, onTo
         )}
       </div>
 
-      {/* ── Info ── */}
+      {/* Info */}
       <div className="p-2.5 sm:p-3.5 flex flex-col gap-1 flex-1">
         <div className="flex items-center gap-1 text-[9px] sm:text-[10px] font-medium text-gray-400">
           {product.originType === "Locally Sourced" ? <LocalIcon /> : <ImportIcon />}
@@ -156,7 +177,7 @@ function ProductCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick, onTo
           <span className="text-[9px] text-gray-400 ml-1">({product.reviews})</span>
         </div>
 
-        {/* ── Price row ── */}
+        {/* Price */}
         <div className="flex items-baseline gap-1.5 mt-0.5">
           <span className="text-sm sm:text-base font-extrabold text-gray-900">₹{variant.price}</span>
           <span className="text-[9px] sm:text-[10px] text-gray-400 line-through">₹{variant.mrp}</span>
@@ -167,64 +188,53 @@ function ProductCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick, onTo
           )}
         </div>
 
-        {/* ── Action row ── */}
+        {/* Actions */}
         <div className="flex items-center gap-1.5 mt-1" onClick={e => e.stopPropagation()}>
 
-          {/* qty stepper OR Add button */}
+          {/* Add / Qty stepper */}
           {hasItems ? (
             <div className="flex items-center gap-1 bg-gray-100 rounded-full px-1.5 py-1 flex-shrink-0">
-              <button
-                onClick={(e) => { e.stopPropagation(); onDec(); }}
-                className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-[#1A3A5C] transition-colors"
-              >
+              <button onClick={e => { e.stopPropagation(); onDec(); }}
+                className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-[#1A3A5C] transition-colors">
                 <MinusIcon />
               </button>
               <span className="text-[11px] font-bold text-gray-800 w-4 text-center tabular-nums">{qty}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); onInc(); }}
-                className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-[#1A3A5C] transition-colors"
-              >
+              <button onClick={e => { e.stopPropagation(); onInc(); }}
+                className="w-5 h-5 flex items-center justify-center text-gray-600 hover:text-[#1A3A5C] transition-colors">
                 <PlusIcon />
               </button>
             </div>
           ) : (
             <button
-              onClick={(e) => { e.stopPropagation(); onFirstAdd(); }}
+              onClick={e => { e.stopPropagation(); onFirstAdd(); }}
               className="flex-1 text-[10px] sm:text-xs font-bold py-1.5 rounded-full border-2 border-[#1A3A5C] text-[#1A3A5C] hover:bg-[#EAF1FA] transition-all active:scale-95"
             >
               + Add
             </button>
           )}
 
-          {/* Buy button — always visible, amount = qty × price */}
+          {/* Buy button */}
           <button
-            onClick={(e) => { e.stopPropagation(); triggerBuy(variant, qty > 0 ? qty : 1); }}
+            onClick={e => { e.stopPropagation(); triggerBuy(variant, qty > 0 ? qty : 1); }}
             disabled={isPaying}
-            className={`flex items-center gap-1 text-[10px] sm:text-xs font-bold px-2.5 sm:px-3 py-1.5 rounded-full transition-all active:scale-95 shadow-sm flex-shrink-0
+            className={`flex items-center gap-1 text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 rounded-full transition-all active:scale-95 shadow-sm flex-shrink-0
               ${isSuccess
                 ? "bg-green-500 text-white"
                 : isPaying
                 ? "bg-[#1A3A5C]/50 text-white cursor-not-allowed"
+                : !isLoggedIn
+                ? "bg-gray-700 text-white hover:bg-[#1A3A5C]"   // darker = login required hint
                 : "bg-[#1A3A5C] text-white hover:bg-[#142d47]"
               }`}
           >
             {isPaying ? (
-              <>
-                <svg className="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <span className="hidden sm:inline">Paying…</span>
-              </>
+              <><svg className="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span className="hidden sm:inline">Paying…</span></>
             ) : isSuccess ? (
               <><CheckIcon /><span className="hidden sm:inline">Done!</span></>
+            ) : !isLoggedIn ? (
+              <><LockIcon /><span>Login</span></>   // shows lock icon when not logged in
             ) : (
-              <>
-                <BuyIcon />
-                <span>
-                  {hasItems ? `Buy ₹${total}` : `Buy ₹${variant.price}`}
-                </span>
-              </>
+              <><BuyIcon /><span>{hasItems ? `Buy ₹${total}` : `Buy ₹${variant.price}`}</span></>
             )}
           </button>
         </div>
@@ -234,6 +244,7 @@ function ProductCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick, onTo
 }
 
 // ── ProductGrid ────────────────────────────────────────────────────────────
+// New prop: onAuthRequired — called when Buy clicked without login
 export default function ProductGrid({
   products = PRODUCTS,
   cart = {},
@@ -241,19 +252,20 @@ export default function ProductGrid({
   onDec,
   onFirstAdd,
   onProductClick = () => {},
+  onAuthRequired,         // ← passed from Home → App → navigate("/login")
 }) {
   const [localCart, setLocalCart] = useState({});
-  const [toast, setToast] = useState(null);
+  const [toast, setToast]         = useState(null);
 
   const isControlled = typeof onInc === "function";
   const activeCart   = isControlled ? cart : localCart;
-  const handleInc    = isControlled ? onInc    : id => setLocalCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
-  const handleDec    = isControlled ? onDec    : id => setLocalCart(c => { const n=(c[id]||1)-1; return n<=0?{...c,[id]:0}:{...c,[id]:n}; });
+  const handleInc    = isControlled ? onInc      : id => setLocalCart(c => ({ ...c, [id]: (c[id] || 0) + 1 }));
+  const handleDec    = isControlled ? onDec      : id => setLocalCart(c => { const n=(c[id]||1)-1; return n<=0?{...c,[id]:0}:{...c,[id]:n}; });
   const handleFirst  = isControlled ? onFirstAdd : id => setLocalCart(c => ({ ...c, [id]: 1 }));
 
   const showToast = useCallback((t) => {
     setToast(t);
-    setTimeout(() => setToast(null), 5000);
+    setTimeout(() => setToast(null), 4000);
   }, []);
 
   return (
@@ -270,16 +282,11 @@ export default function ProductGrid({
             onFirstAdd={() => handleFirst(p.id)}
             onCardClick={onProductClick}
             onToast={showToast}
+            onAuthRequired={onAuthRequired}  // ← passed to card → useBuyFlow
           />
         ))}
       </div>
-
-      <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-      `}</style>
+      <style>{`@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
     </>
   );
 }
