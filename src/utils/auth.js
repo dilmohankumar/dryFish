@@ -3,49 +3,54 @@
 // All auth API calls pointing to your Express backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASE = "http://localhost:5000/api/auth";
+const BASE = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1";
 
 async function request(path, body, token) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || "Something went wrong");
-  return data;
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const errorMsg = data.message || data.error || "Something went wrong";
+      console.error(`[${res.status}] ${path}:`, errorMsg);
+      throw new Error(errorMsg);
+    }
+    return data;
+  } catch (err) {
+    console.error("Request error:", err);
+    throw err;
+  }
 }
 
-// POST /api/auth/signup
+// POST /api/v1/auth/signup
 export const apiSignup = (payload) =>
-  request("/signup", payload);
+  request("/auth/signup", payload);
 
-// POST /api/auth/login  → { email/phone, password }
+// POST /api/v1/auth/login  → { email/phone, password }
 export const apiLogin = (payload) =>
-  request("/login", payload);
+  request("/auth/login", payload);
 
-// POST /api/auth/send-otp
-export const apiSendOTP = (payload) =>
-  request("/send-otp", payload);
-
-// POST /api/auth/verify-otp
+// POST /api/v1/auth/signup/verify-otp
 export const apiVerifyOTP = (payload) =>
-  request("/verify-otp", payload);
+  request("/auth/signup/verify-otp", payload);
 
-// POST /api/auth/forget-password
+// POST /api/v1/auth/password-reset/request
 export const apiForgetPassword = (payload) =>
-  request("/forget-password", payload);
+  request("/auth/password-reset/request", payload);
 
-// POST /api/auth/reset-password
+// POST /api/v1/auth/password-reset/verify-otp
 export const apiResetPassword = (payload) =>
-  request("/reset-password", payload);
+  request("/auth/password-reset/verify-otp", payload);
 
-// GET /api/auth/me  (needs token)
+// GET /api/v1/auth/me  (needs token)
 export const apiGetMe = async (token) => {
-  const res = await fetch(`${BASE}/me`, {
+  const res = await fetch(`${BASE}/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json();

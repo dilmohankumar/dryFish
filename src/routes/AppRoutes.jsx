@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Navbar from "../components/layout/Navbar/navbar.jsx";
 import Footer from "../components/layout/Footer/footer.jsx";
 import Home from "../pages/home.jsx";
@@ -6,9 +6,14 @@ import Sidebar from "../components/layout/sidebar/sidebar.jsx";
 import ProductDetail from "../pages/productDetails.jsx";
 import Login from "../pages/auth/login.jsx";
 import Signup from "../pages/auth/signup.jsx";
+import Cart from "../pages/cart.jsx";
+import Checkout from "../pages/checkout.jsx";
+import Orders from "../pages/orders.jsx";
+import Wishlist from "../pages/wishlist.jsx";
+import Profile from "../pages/profile.jsx";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { userAPI } from "../utils/api.js";
 
-// ─ Store layout (Navbar + Sidebar + Home/Detail + Footer) ─  
 function StoreLayout({ user, onLogout, onLoginClick }) {
   const [selectedSort, setSelectedSort] = useState(null);
   const [selectedCats, setSelectedCats] = useState([]);
@@ -16,12 +21,20 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState({});
+  const navigate = useNavigate();
+  const [currentPage, setCurrentPage] = useState("home");
+  const [checkoutData, setCheckoutData] = useState(null);
 
   const cartInc = useCallback(id => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })), []);
   const cartDec = useCallback(id => setCart(c => { const n = (c[id] || 1) - 1; return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n }; }), []);
   const cartFirstAdd = useCallback(id => setCart(c => ({ ...c, [id]: 1 })), []);
   const cartRemove = useCallback(id => setCart(c => ({ ...c, [id]: 0 })), []);
   const clearFilters = () => { setSelectedSort(null); setSelectedCats([]); setSelectedOrigins([]); };
+
+  const handleCheckout = (items, total) => {
+    setCheckoutData({ items, total });
+    setCurrentPage("checkout");
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
@@ -35,9 +48,39 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
         user={user}
         onLoginClick={onLoginClick}
         onLogout={onLogout}
+        onNavigate={setCurrentPage}
       />
 
-      {selectedProduct ? (
+      {currentPage === "checkout" && checkoutData ? (
+        <div className="flex-1">
+          <Checkout
+            cartItems={checkoutData.items}
+            total={checkoutData.total}
+            onBack={() => {
+              setCurrentPage("cart");
+              setCheckoutData(null);
+            }}
+          />
+        </div>
+      ) : currentPage === "cart" ? (
+        <div className="flex-1">
+          <Cart
+            onCheckout={handleCheckout}
+          />
+        </div>
+      ) : currentPage === "orders" ? (
+        <div className="flex-1">
+          <Orders />
+        </div>
+      ) : currentPage === "wishlist" ? (
+        <div className="flex-1">
+          <Wishlist />
+        </div>
+      ) : currentPage === "profile" ? (
+        <div className="flex-1">
+          <Profile />
+        </div>
+      ) : selectedProduct ? (
         <div className="flex-1">
           <ProductDetail
             product={selectedProduct}
@@ -82,10 +125,28 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
   );
 }
 
-// ── App ────────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    checkUserSession();
+  }, []);
+
+  const checkUserSession = async () => {
+    const token = localStorage.getItem("df_token");
+    if (token) {
+      try {
+        const userData = await userAPI.getMe();
+        setUser(userData.data || userData.user);
+      } catch (err) {
+        localStorage.removeItem("df_token");
+        localStorage.removeItem("df_refreshToken");
+      }
+    }
+    setLoading(false);
+  };
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
@@ -99,12 +160,15 @@ export default function App() {
 
   const handleLogout = () => {
     setUser(null);
+    localStorage.removeItem("df_token");
+    localStorage.removeItem("df_refreshToken");
     navigate("/login", { replace: true });
   };
 
+  if (loading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+
   return (
     <Routes>
-      {/* Auth pages — no navbar/footer */}
       <Route
         path="/login"
         element={
@@ -122,7 +186,6 @@ export default function App() {
         }
       />
 
-      {/* Main store — all other paths */}
       <Route
         path="/*"
         element={

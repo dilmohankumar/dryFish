@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { apiSignup, apiSendOTP, apiVerifyOTP } from "../../utils/auth";
+import { apiSignup, apiVerifyOTP } from "../../utils/auth";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const EyeIcon = () => (<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>);
@@ -14,7 +14,8 @@ const GoogleIcon = () => (<svg className="w-5 h-5" viewBox="0 0 24 24"><path fil
 
 // ── Validation ──
 const validate = {
-  name: v => !v.trim() ? "Full name is required" : v.trim().length < 2 ? "At least 2 characters" : !/^[a-zA-Z\s'-]+$/.test(v) ? "Letters only" : null,
+  firstName: v => !v.trim() ? "First name is required" : v.trim().length < 2 ? "At least 2 characters" : !/^[a-zA-Z'-]+$/.test(v) ? "Letters only" : null,
+  lastName: v => !v.trim() ? "Last name is required" : v.trim().length < 2 ? "At least 2 characters" : !/^[a-zA-Z'-]+$/.test(v) ? "Letters only" : null,
   email: v => !v.trim() ? "Email is required" : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "Enter a valid email" : null,
   phone: v => !v.trim() ? "Phone is required" : !/^[6-9]\d{9}$/.test(v.replace(/\s/g, "")) ? "Valid 10-digit Indian number" : null,
   password: v => !v ? "Password is required" : v.length < 8 ? "Min 8 characters" : !/[A-Z]/.test(v) ? "Include one uppercase letter" : !/[0-9]/.test(v) ? "Include one number" : null,
@@ -104,7 +105,7 @@ function Steps({ current, total }) {
 // ── Signup ─────────────────────────────────────────────────────────────────
 export default function Signup({ onSignupSuccess, onGoToLogin }) {
   const [step, setStep] = useState(0); // 0=details, 1=otp, 2=done
-  const [form, setForm] = useState({ name: "", email: "", phone: "", password: "", confirmPassword: "", otp: "", agree: false });
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", phone: "", password: "", confirmPassword: "", otp: "", agree: false });
   const [touched, setTouched] = useState({});
   const [showPw, setShowPw] = useState(false);
   const [showCPw, setShowCPw] = useState(false);
@@ -125,7 +126,8 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
   const blur = f => () => setTouched(t => ({ ...t, [f]: true }));
 
   const step0Errors = {
-    name: validate.name(form.name), email: validate.email(form.email),
+    firstName: validate.firstName(form.firstName), lastName: validate.lastName(form.lastName),
+    email: validate.email(form.email),
     phone: validate.phone(form.phone), password: validate.password(form.password),
     confirmPassword: validate.confirmPassword(form.confirmPassword, form.password),
     agree: form.agree ? null : "You must accept the terms",
@@ -136,27 +138,29 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
   // ── Step 0: Signup + Send OTP ────────────────────────────────────────────
   const handleSubmitDetails = useCallback(async (e) => {
     e.preventDefault();
-    setTouched({ name: true, email: true, phone: true, password: true, confirmPassword: true, agree: true });
+    setTouched({ firstName: true, lastName: true, email: true, phone: true, password: true, confirmPassword: true, agree: true });
     if (!step0Valid) return;
 
     setStatus("loading");
     setServerError("");
     try {
-      // 1. POST /api/auth/signup  → create user in DB
-      await apiSignup({
-        name: form.name,
+      // POST /api/v1/auth/signup (OTP is sent automatically by backend)
+      const payload = {
+        firstName: form.firstName,
+        lastName: form.lastName,
         email: form.email,
         phone: form.phone,
         password: form.password,
-      });
-
-      // 2. POST /api/auth/send-otp  → send OTP to email
-      await apiSendOTP({ email: form.email });
+        confirmPassword: form.confirmPassword,
+      };
+      console.log("📤 Signup request:", { ...payload, password: "***", confirmPassword: "***" });
+      await apiSignup(payload);
 
       setStatus("idle");
       setStep(1);
       setTimer(60);
     } catch (err) {
+      console.error("❌ Signup error:", err);
       setStatus("error");
       setServerError(err.message || "Signup failed. Please try again.");
       setTimeout(() => setStatus("idle"), 100);
@@ -170,8 +174,15 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
     setTimer(60);
     setForm(f => ({ ...f, otp: "" }));
     try {
-      // POST /api/auth/send-otp
-      await apiSendOTP({ email: form.email });
+      // Resend OTP by calling signup again (backend will detect user exists and send OTP)
+      await apiSignup({
+        firstName: form.firstName,
+        lastName: form.lastName,
+        email: form.email,
+        phone: form.phone,
+        password: form.password,
+        confirmPassword: form.confirmPassword,
+      });
     } catch (err) {
       setServerError(err.message || "Failed to resend OTP");
     }
@@ -194,7 +205,7 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
 
       setStatus("success");
       setStep(2);
-      setTimeout(() => onSignupSuccess(data.user || { name: form.name, email: form.email }), 1500);
+      setTimeout(() => onSignupSuccess(data.user || { firstName: form.firstName, lastName: form.lastName, email: form.email }), 1500);
     } catch (err) {
       setStatus("error");
       setServerError(err.message || "Invalid OTP. Please try again.");
@@ -235,11 +246,18 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
                 <div className="flex-1 h-px bg-gray-200" />
               </div>
 
-              <Field label="Full Name" icon={<UserIcon />} error={step0Errors.name} touched={touched.name}>
-                <input type="text" value={form.name} onChange={set("name")} onBlur={blur("name")}
-                  placeholder="John Doe" autoComplete="name"
-                  className="w-full pl-11 pr-10 py-3 rounded-xl bg-transparent text-sm text-gray-800 placeholder-gray-400 focus:outline-none" />
-              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="First Name" icon={<UserIcon />} error={step0Errors.firstName} touched={touched.firstName}>
+                  <input type="text" value={form.firstName} onChange={set("firstName")} onBlur={blur("firstName")}
+                    placeholder="John" autoComplete="given-name"
+                    className="w-full pl-11 pr-10 py-3 rounded-xl bg-transparent text-sm text-gray-800 placeholder-gray-400 focus:outline-none" />
+                </Field>
+                <Field label="Last Name" icon={<UserIcon />} error={step0Errors.lastName} touched={touched.lastName}>
+                  <input type="text" value={form.lastName} onChange={set("lastName")} onBlur={blur("lastName")}
+                    placeholder="Doe" autoComplete="family-name"
+                    className="w-full pl-11 pr-10 py-3 rounded-xl bg-transparent text-sm text-gray-800 placeholder-gray-400 focus:outline-none" />
+                </Field>
+              </div>
 
               <Field label="Email Address" icon={<MailIcon />} error={step0Errors.email} touched={touched.email}>
                 <input type="email" value={form.email} onChange={set("email")} onBlur={blur("email")}
@@ -377,7 +395,7 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-extrabold text-gray-900">Welcome, {form.name.split(" ")[0]}! 🎉</h2>
+                <h2 className="text-xl font-extrabold text-gray-900">Welcome, {form.firstName}! 🎉</h2>
                 <p className="text-sm text-gray-500 mt-1">Your account has been created successfully.</p>
               </div>
               <div className="bg-[#EAF1FA] rounded-xl px-5 py-3 text-sm text-[#1A3A5C] font-medium">

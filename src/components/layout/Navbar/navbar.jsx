@@ -231,7 +231,13 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
 }
 
 // ── User Dropdown ──────────────────────────────────────────────────────────
-function UserDropdown({ user, onLogout, onClose }) {
+const WishlistIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+  </svg>
+);
+
+function UserDropdown({ user, onLogout, onClose, onNavigate }) {
   const ref = useRef(null);
 
   // Close on outside click
@@ -245,6 +251,11 @@ function UserDropdown({ user, onLogout, onClose }) {
     ? user.name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase()
     : user?.email?.[0]?.toUpperCase() || "U";
 
+  const handleNavigate = (page) => {
+    onNavigate(page);
+    onClose();
+  };
+
   return (
     <div ref={ref} className="absolute right-0 top-full mt-2 w-56 bg-white border border-gray-100 rounded-2xl shadow-xl z-50 overflow-hidden">
       {/* User info */}
@@ -255,10 +266,13 @@ function UserDropdown({ user, onLogout, onClose }) {
 
       {/* Menu items */}
       <div className="py-1">
-        <button className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+        <button onClick={() => handleNavigate("orders")} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
           <OrdersIcon /> My Orders
         </button>
-        <button className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+        <button onClick={() => handleNavigate("wishlist")} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+          <WishlistIcon /> My Wishlist
+        </button>
+        <button onClick={() => handleNavigate("profile")} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
           <UserIcon /> My Profile
         </button>
       </div>
@@ -292,6 +306,7 @@ export default function Navbar({
   onLogoClick,
   onLoginClick,
   onLogout,
+  onNavigate,
 }) {
   const [searchValue, setSearchValue] = useState("");
   const [cartOpen, setCartOpen]       = useState(false);
@@ -450,6 +465,7 @@ export default function Navbar({
                     user={user}
                     onLogout={handleLogout}
                     onClose={() => setDropdownOpen(false)}
+                    onNavigate={onNavigate}
                   />
                 )}
               </div>
@@ -471,8 +487,19 @@ export default function Navbar({
               </div>
             )}
 
+            {/* Wishlist */}
+            {isLoggedIn && (
+              <button onClick={() => onNavigate("wishlist")}
+                className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#1A3A5C] transition-colors text-xs font-medium">
+                <div className="relative">
+                  <WishlistIcon />
+                </div>
+                <span className="hidden sm:block">Wishlist</span>
+              </button>
+            )}
+
             {/* Cart */}
-            <button onClick={() => setCartOpen(true)}
+            <button onClick={() => onNavigate("cart")}
               className="relative flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#1A3A5C] transition-colors text-xs font-medium">
               <div className="relative">
                 <CartIcon />

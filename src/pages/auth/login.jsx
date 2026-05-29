@@ -101,17 +101,27 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
     setStatus("loading");
     setServerError("");
     try {
-      // POST http://localhost:5000/api/auth/login
-      const data = await apiLogin({
+      const payload = {
         ...(tab === "email" ? { email: form.email } : { phone: form.phone }),
         password: form.password,
-      });
+      };
+      console.log("📤 Login request:", { ...payload, password: "***" });
+      
+      const data = await apiLogin(payload);
+      console.log("✅ Login success:", data);
 
-      // Store token — backend should return { token, user }
+      if (!data.token) {
+        throw new Error("Server did not return a token");
+      }
+      
       localStorage.setItem("df_token", data.token);
+      if (data.refreshToken) {
+        localStorage.setItem("df_refreshToken", data.refreshToken);
+      }
       setStatus("success");
       setTimeout(() => onLoginSuccess(data.user || { email: form.email }), 700);
     } catch (err) {
+      console.error("❌ Login error:", err.message);
       setStatus("error");
       setServerError(err.message || "Invalid credentials. Please try again.");
       setTimeout(() => setStatus("idle"), 100);
@@ -123,7 +133,6 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
     if (validate.email(form.email)) { setTouched(t => ({ ...t, email: true })); return; }
     setForgotState("sending");
     try {
-      // POST http://localhost:5000/api/auth/forget-password
       await apiForgetPassword({ email: form.email });
       setForgotState("sent");
     } catch (err) {
