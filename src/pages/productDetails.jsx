@@ -1,5 +1,7 @@
 import { useState, useCallback } from "react";
 import { openRazorpay } from "../hooks/useRazorpay.js";
+import bombayDuckImage from "../assets/bombay-duck.jpg";
+import dryPrawnsImage from "../assets/Dry-Prawns.jpg";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const ShareIcon = () => (
@@ -89,6 +91,22 @@ function Toast({ toast, onClose }) {
   );
 }
 
+// ── Helper function to get product image ───────────────────────────────────
+const getProductImage = (productName) => {
+  if (!productName) return bombayDuckImage;
+  
+  const name = productName.toLowerCase();
+  if (name.includes("prawn") || name.includes("shrimp")) {
+    return dryPrawnsImage;
+  }
+  // Add more conditions for other products here
+  // if (name.includes("bombay") || name.includes("duck")) {
+  //   return bombayDuckImage;
+  // }
+  
+  return bombayDuckImage; // default image
+};
+
 // ── ProductDetail ──────────────────────────────────────────────────────────
 // Props:
 //   product          — full product object from ProductGrid PRODUCTS array
@@ -110,7 +128,27 @@ export default function ProductDetail({
   const [buyStatus, setBuyStatus]           = useState("idle"); // idle | paying | success | failed
   const [toast, setToast]                   = useState(null);
 
-  const variant  = product.variants[selectedVariant];
+  // Guard against missing product prop
+  if (!product) {
+    return (
+      <div className="bg-white min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-500">Product not found</p>
+          <button onClick={onBack} className="mt-4 text-[#1A3A5C] underline">Go back</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Get variants from product, default to empty array
+  const variants = product.variants || [];
+  const variant  = variants[selectedVariant] || (variants.length > 0 ? variants[0] : { price: 0, label: "", mrp: 0 });
+  // slides array from product, default to empty array
+  const slides = product.slides || [];
+  
+  // Get the appropriate image for this product
+  const productImage = getProductImage(product.name);
+  
   // qty in global cart for this product
   const qty      = cart[product.id] || 0;
   const total    = variant.price * (qty || 1);
@@ -166,8 +204,15 @@ export default function ProductDetail({
   }, [product, variant, qty, isPaying]);
 
   // ── Slide navigation ───────────────────────────────────────────────────
-  const prevSlide = () => setSlide(s => (s - 1 + product.slides.length) % product.slides.length);
-  const nextSlide = () => setSlide(s => (s + 1) % product.slides.length);
+  const prevSlide = () => {
+    if (!slides.length) return;
+    setSlide((s) => (s - 1 + slides.length) % slides.length);
+  };
+  
+  const nextSlide = () => {
+    if (!slides.length) return;
+    setSlide((s) => (s + 1) % slides.length);
+  };
 
   // ── Share ──────────────────────────────────────────────────────────────
   const handleShare = () => {
@@ -215,30 +260,37 @@ export default function ProductDetail({
 
           <div
             className="rounded-xl sm:rounded-2xl flex items-center justify-center overflow-hidden w-full"
-            style={{ background: product.bg, minHeight: 280 }}
+            style={{ background: product.bg || "#f5f5f5", minHeight: 280 }}
           >
-            <span className="text-[100px] sm:text-[140px] select-none">{product.slides[slide]}</span>
+            {/* Dynamically show image based on product */}
+            <img 
+              src={productImage}
+              className="w-full h-auto max-h-[280px] sm:max-h-[360px] object-contain" 
+              alt={product.name} 
+            />
           </div>
 
-          <div className="flex items-center justify-center gap-3 sm:gap-4 mt-4 sm:mt-5">
-            <div className="flex items-center gap-2">
-              {product.slides.map((_, i) => (
-                <button
-                  key={i}
-                  onClick={() => setSlide(i)}
-                  className={`rounded-full transition-all ${i === slide ? "w-3 h-3 bg-[#1A3A5C]" : "w-2 h-2 bg-gray-300 hover:bg-gray-400"}`}
-                />
-              ))}
+          {slides.length > 1 && (
+            <div className="flex items-center justify-center gap-3 sm:gap-4 mt-4 sm:mt-5">
+              <div className="flex items-center gap-2">
+                {slides.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSlide(i)}
+                    className={`rounded-full transition-all ${i === slide ? "w-3 h-3 bg-[#1A3A5C]" : "w-2 h-2 bg-gray-300 hover:bg-gray-400"}`}
+                  />
+                ))}
+              </div>
+              <div className="flex gap-2 ml-3">
+                <button onClick={prevSlide} className="border border-gray-200 rounded-lg p-2 text-gray-500 hover:border-[#1A3A5C] hover:text-[#1A3A5C] transition-colors bg-white">
+                  <ChevronLeftIcon />
+                </button>
+                <button onClick={nextSlide} className="border border-gray-200 rounded-lg p-2 text-gray-500 hover:border-[#1A3A5C] hover:text-[#1A3A5C] transition-colors bg-white">
+                  <ChevronRightIcon />
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2 ml-3">
-              <button onClick={prevSlide} className="border border-gray-200 rounded-lg p-2 text-gray-500 hover:border-[#1A3A5C] hover:text-[#1A3A5C] transition-colors bg-white">
-                <ChevronLeftIcon />
-              </button>
-              <button onClick={nextSlide} className="border border-gray-200 rounded-lg p-2 text-gray-500 hover:border-[#1A3A5C] hover:text-[#1A3A5C] transition-colors bg-white">
-                <ChevronRightIcon />
-              </button>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Right — product info */}
@@ -263,32 +315,34 @@ export default function ProductDetail({
           {/* Stars */}
           <div className="flex items-center gap-2">
             <div className="flex gap-0.5">
-              {Array.from({ length: 5 }, (_, i) => <StarIcon key={i} filled={i < product.rating} />)}
+              {Array.from({ length: 5 }, (_, i) => <StarIcon key={i} filled={i < (product.rating || 0)} />)}
             </div>
-            <span className="text-sm text-gray-500">({product.reviews} reviews)</span>
+            <span className="text-sm text-gray-500">({product.reviews || 0} reviews)</span>
           </div>
 
           {/* Variant selector */}
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Select Weight</p>
-            <div className="flex flex-wrap gap-2">
-              {product.variants.map((v, i) => (
-                <button
-                  key={i}
-                  onClick={() => setSelectedVariant(i)}
-                  className={`flex items-center gap-2 border rounded-xl px-3 sm:px-4 py-2 text-sm font-medium transition-all ${
-                    selectedVariant === i
-                      ? "border-[#1A3A5C] bg-[#1A3A5C] text-white"
-                      : "border-gray-200 text-gray-700 hover:border-[#1A3A5C]"
-                  }`}
-                >
-                  <span>{v.label}</span>
-                  <span className={selectedVariant === i ? "text-white/70" : "text-gray-400"}>— ₹{v.price}</span>
-                  {selectedVariant === i && <span className="ml-1 bg-white/20 rounded-full p-0.5"><CheckIcon /></span>}
-                </button>
-              ))}
+          {variants.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Select Weight</p>
+              <div className="flex flex-wrap gap-2">
+                {variants.map((v, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedVariant(i)}
+                    className={`flex items-center gap-2 border rounded-xl px-3 sm:px-4 py-2 text-sm font-medium transition-all ${
+                      selectedVariant === i
+                        ? "border-[#1A3A5C] bg-[#1A3A5C] text-white"
+                        : "border-gray-200 text-gray-700 hover:border-[#1A3A5C]"
+                    }`}
+                  >
+                    <span>{v.label}</span>
+                    <span className={selectedVariant === i ? "text-white/70" : "text-gray-400"}>— ₹{v.price}</span>
+                    {selectedVariant === i && <span className="ml-1 bg-white/20 rounded-full p-0.5"><CheckIcon /></span>}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Price row */}
           <div className="flex items-baseline gap-3 flex-wrap">
@@ -399,7 +453,7 @@ export default function ProductDetail({
         <section>
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4">How We Pick The Best For You?</h2>
           <ul className="space-y-2">
-            {product.howWePickTheBest.map((item, i) => (
+          {(product.howWePickTheBest || []).map((item, i) => (
               <li key={i} className="flex items-start gap-2 text-gray-600 text-sm sm:text-base">
                 <span className="text-gray-400 mt-0.5 flex-shrink-0">–</span>
                 <span>{item}</span>
