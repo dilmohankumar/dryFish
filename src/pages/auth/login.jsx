@@ -149,7 +149,7 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
         <div className="text-center mb-8">
           <span className="text-3xl font-black tracking-tight">
             <span className="text-[#1A3A5C]">dry</span>
-            <span className="text-[#E07B39]">fish</span>
+            <span className="text-[#E07B39]">catch</span>
             <span className="text-[#1A3A5C]">.co</span>
           </span>
           <p className="text-gray-500 text-sm mt-2">Welcome back! Sign in to continue</p>
@@ -244,7 +244,7 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
             </button>
 
             <p className="text-center text-sm text-gray-500">
-              New to dryfish.co?{" "}
+              New to drycatch.co?{" "}
               <button type="button" onClick={onGoToSignup} className="text-[#E07B39] font-bold hover:underline">Create account</button>
             </p>
           </form>

@@ -20,14 +20,14 @@ function loadRazorpayScript() {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────
 // openRazorpay({
 //   product, variant, qty,
 //   onSuccess, onFailure,
-//   onAuthRequired,     ← NEW: called when user is not logged in
+//   onAuthRequired,    
 //   customDescription,
 // })
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────
 export async function openRazorpay({
   product,
   variant,
@@ -79,7 +79,7 @@ export async function openRazorpay({
     key: RAZORPAY_KEY,
     amount: totalPaise,
     currency: "INR",
-    name: "dryfish.co",
+    name: "drycatch.co",
     description: customDescription || `${product.name} — ${variant.label} × ${qty}`,
     image: "/logo.png",
     // order_id,  // ← uncomment when backend is ready

@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import Navbar from "../components/layout/Navbar/navbar.jsx";
 import Footer from "../components/layout/Footer/footer.jsx";
 import Home from "../pages/home.jsx";
+import Shop from "../pages/shop.jsx";
+import CategoryPage from "../pages/category.jsx";
 import Sidebar from "../components/layout/sidebar/sidebar.jsx";
 import ProductDetail from "../pages/productDetails.jsx";
 import Login from "../pages/auth/login.jsx";
@@ -13,6 +15,7 @@ import Wishlist from "../pages/wishlist.jsx";
 import Profile from "../pages/profile.jsx";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { userAPI } from "../utils/api.js";
+import { getMegaMenu } from "../data/megaMenu.js";
 
 function StoreLayout({ user, onLogout, onLoginClick }) {
   const [selectedSort, setSelectedSort] = useState(null);
@@ -24,6 +27,14 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
   const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState("home");
   const [checkoutData, setCheckoutData] = useState(null);
+  const [shopCategory, setShopCategory] = useState("All");
+  // Category rough-page state (mega menu / primary nav destinations)
+  const [categoryState, setCategoryState] = useState({
+    slug: "dry-prawns",
+    filter: "Prawns",
+    tag: null,
+    label: null,
+  });
 
   const cartInc = useCallback(id => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })), []);
   const cartDec = useCallback(id => setCart(c => { const n = (c[id] || 1) - 1; return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n }; }), []);
@@ -36,6 +47,38 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
     setCurrentPage("checkout");
   };
 
+  // ── Navigation helpers ──────────────────────────────────────────────────
+  const goHome = () => { setCurrentPage("home"); setSelectedProduct(null); };
+  const goShop = (category = "All") => {
+    setShopCategory(category);
+    setCurrentPage("shop");
+    setSelectedProduct(null);
+  };
+  const goCategory = (payload = {}) => {
+    const slug = payload.slug || "featured-new";
+    const menu = getMegaMenu(slug);
+    setCategoryState({
+      slug,
+      filter: payload.filter || menu?.filter || "All",
+      tag: payload.tag || null,
+      label: payload.label || null,
+    });
+    setCurrentPage("category");
+    setSelectedProduct(null);
+  };
+  const handleCategorySelect = (cat) => {
+    if (cat?.slug) {
+      return goCategory({
+        slug: cat.slug,
+        filter: cat.filter,
+        tag: cat.tag,
+        label: cat.labelNav || cat.label,
+      });
+    }
+    // Fallback for older callers that only pass a filter string/object
+    goShop(cat?.filter || "All");
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
       <Navbar
@@ -44,11 +87,12 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
         onCartInc={cartInc}
         onCartDec={cartDec}
         onCartRemove={cartRemove}
-        onLogoClick={() => setSelectedProduct(null)}
+        onLogoClick={goHome}
         user={user}
         onLoginClick={onLoginClick}
         onLogout={onLogout}
         onNavigate={setCurrentPage}
+        onCategorySelect={handleCategorySelect}
       />
 
       {currentPage === "checkout" && checkoutData ? (
@@ -91,7 +135,24 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
             onCartFirstAdd={cartFirstAdd}
           />
         </div>
-      ) : (
+      ) : currentPage === "category" ? (
+        <div className="flex-1">
+          <CategoryPage
+            key={`${categoryState.slug}-${categoryState.filter}-${categoryState.tag || ""}-${categoryState.label || ""}`}
+            slug={categoryState.slug}
+            filter={categoryState.filter}
+            tag={categoryState.tag}
+            highlightLabel={categoryState.label}
+            cart={cart}
+            onInc={cartInc}
+            onDec={cartDec}
+            onFirstAdd={cartFirstAdd}
+            onProductClick={setSelectedProduct}
+            onBackToHome={goHome}
+            onNavigateCategory={goCategory}
+          />
+        </div>
+      ) : currentPage === "shop" ? (
         <div className="flex flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-5 sm:gap-8">
           <Sidebar
             open={sidebarOpen}
@@ -105,7 +166,8 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
             onClearAll={clearFilters}
           />
           <main className="flex-1 min-w-0">
-            <Home
+            <Shop
+              key={shopCategory}
               selectedSort={selectedSort}
               selectedCats={selectedCats}
               selectedOrigins={selectedOrigins}
@@ -115,8 +177,22 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
               onDec={cartDec}
               onFirstAdd={cartFirstAdd}
               onOpenSidebar={() => setSidebarOpen(true)}
+              onBackToHome={goHome}
+              initialCategory={shopCategory}
             />
           </main>
+        </div>
+      ) : (
+        <div className="flex-1">
+          <Home
+            cart={cart}
+            onInc={cartInc}
+            onDec={cartDec}
+            onFirstAdd={cartFirstAdd}
+            onProductClick={setSelectedProduct}
+            onShopNow={() => goCategory({ slug: "featured-new", filter: "All", label: "Featured & New" })}
+            onCategorySelect={handleCategorySelect}
+          />
         </div>
       )}
 

@@ -238,7 +238,7 @@ export default function ProductDetail({
             <BackIcon /> Home
           </button>
           <span>›</span>
-          <span className="hover:text-gray-700 cursor-pointer transition-colors">{product.category || "Dry Fish"}</span>
+          <span className="hover:text-gray-700 cursor-pointer transition-colors">{product.category || "Dry Catch"}</span>
           <span>›</span>
           <span className="text-gray-700 font-medium truncate max-w-[160px] sm:max-w-xs">
             {product.name.toLowerCase().replace(/\s+/g, "-")}
@@ -476,13 +476,13 @@ export default function ProductDetail({
 
         {/* Lifestyle cards */}
         <section>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Get dryfish.co</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Get drycatch.co</h2>
           <p className="text-gray-500 mt-1 mb-5 text-sm">Meet your lifestyle needs with us</p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             {[
-              { bg: "#EAF1FA", title: "how dryfish.co helps with your lifestyle needs",              emoji: "🐟" },
+              { bg: "#EAF1FA", title: "how drycatch.co helps with your lifestyle needs",              emoji: "🐟" },
               { bg: "#1A3A5C", title: "What's right for me? Learn what fish works for a healthier you", emoji: "💡", dark: true },
-              { bg: "#FFF4E6", title: "Find exactly what you need — curated dry fish for every dish",   emoji: "🎯" },
+              { bg: "#FFF4E6", title: "Find exactly what you need — curated Dry Catch for every dish",   emoji: "🎯" },
               { bg: "#E07B39", title: "Enjoyment meets convenience — kits & recipes to save time",      emoji: "🎁", dark: true },
             ].map((card, i) => (
               <div
@@ -501,7 +501,7 @@ export default function ProductDetail({
 
         {/* Peace of mind */}
         <section className="pb-6 sm:pb-8">
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">dryfish.co with Peace of Mind</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2">drycatch.co with Peace of Mind</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 mt-4 sm:mt-5">
             {PROMISES.map((p, i) => (
               <div key={i} className="border border-gray-100 rounded-xl sm:rounded-2xl p-4 sm:p-6 hover:shadow-md transition-shadow">

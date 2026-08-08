@@ -220,7 +220,7 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
         {/* Logo */}
         <div className="text-center mb-6">
           <span className="text-3xl font-black tracking-tight">
-            <span className="text-[#1A3A5C]">dry</span><span className="text-[#E07B39]">fish</span><span className="text-[#1A3A5C]">.co</span>
+            <span className="text-[#1A3A5C]">dry</span><span className="text-[#E07B39]">catch</span><span className="text-[#1A3A5C]">.co</span>
           </span>
           <p className="text-gray-500 text-sm mt-1.5">
             {step === 0 ? "Create your account" : step === 1 ? "Verify your email" : "You're all set!"}

@@ -2,6 +2,11 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { openRazorpay } from "../../../hooks/useRazorpay.js";
 import { PRODUCTS } from "../../../pages/productGrid.jsx";
 import { apiGetMe } from "../../../utils/auth.js";
+import { PRIMARY_NAV } from "../../../data/megaMenu.js";
+import { SECONDARY_NAV } from "../../../data/homeData.js";
+import { getMegaMenu } from "../../../data/megaMenu.js";
+import Logo from "../Logo.jsx";
+import MegaMenu from "./MegaMenu.jsx";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const SearchIcon = () => (
@@ -19,20 +24,19 @@ const UserIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z" />
   </svg>
 );
-const LocationIcon = () => (
-  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-  </svg>
-);
 const ChevronDownIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
   </svg>
 );
-const FilterIcon = () => (
-  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+const MenuIcon = () => (
+  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
+const CloseIcon = () => (
+  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
 const XIcon = () => (
@@ -95,7 +99,7 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
     const description = cartItems.map(({ product, qty }) => `${product.name} ×${qty}`).join(", ");
     try {
       await openRazorpay({
-        product: { id: "cart", name: "dryfish.co Order" },
+        product: { id: "cart", name: "drycatch.co Order" },
         variant: { label: `${cartItems.length} items`, price: grandTotal, mrp: grandTotal },
         qty: 1,
         customDescription: description,
@@ -157,7 +161,7 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
             <div className="text-center py-20">
               <div className="text-5xl mb-4">🛒</div>
               <p className="text-gray-500 font-medium">Your cart is empty</p>
-              <p className="text-sm text-gray-400 mt-1">Add some dry fish to get started</p>
+              <p className="text-sm text-gray-400 mt-1">Add some Dry Catch to get started</p>
               <button onClick={onClose}
                 className="mt-5 bg-[#1A3A5C] text-white text-sm font-semibold px-6 py-2.5 rounded-full hover:bg-[#142d47] transition-colors">
                 Browse Products
@@ -307,10 +311,17 @@ export default function Navbar({
   onLoginClick,
   onLogout,
   onNavigate,
+  onCategorySelect = () => {},
 }) {
   const [searchValue, setSearchValue] = useState("");
   const [cartOpen, setCartOpen]       = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [openMenuSlug, setOpenMenuSlug] = useState(null);
+  // Category nav strips (primary + secondary). No side drawer.
+  // Scroll down → hide. ☰ click → toggle show/hide.
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const [stripsVisible, setStripsVisible] = useState(true);
+  const lastScrollY = useRef(0);
 
   // ── Read token + user from localStorage ─────────────────────────────────
   const [user, setUser] = useState(() => {
@@ -382,140 +393,219 @@ export default function Navbar({
 
   const isLoggedIn = !!user;
 
+  // Scroll down → hide announcement + category strips (main header stays).
+  // ☰ click → toggle category strips only (no side drawer).
+  useEffect(() => {
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        const y = window.scrollY;
+        const delta = y - lastScrollY.current;
+        if (y > 48 && delta > 4) {
+          setChromeHidden(true);
+          setStripsVisible(false);
+          setOpenMenuSlug(null);
+        } else if (y < 10) {
+          setChromeHidden(false);
+          setStripsVisible(true);
+        }
+        lastScrollY.current = y;
+        ticking = false;
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const handleMenuClick = () => {
+    setStripsVisible((v) => !v);
+    setOpenMenuSlug(null);
+  };
+
   return (
-    <div className="font-sans">
-      {/* ── Promo Banner ── */}
-      <div className="bg-[#1A3A5C] text-white flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-6 h-6 sm:w-8 sm:h-8 bg-[#E07B39] rounded flex items-center justify-center font-bold text-xs flex-shrink-0">🐟</div>
-          <span className="font-medium truncate hidden sm:block">Download the App — Get 20% Off + Free Delivery on 1st Order</span>
-          <span className="font-medium sm:hidden">20% Off on 1st Order!</span>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-5 flex-shrink-0">
-          <button className="bg-white text-[#1A3A5C] font-bold px-3 sm:px-5 py-1 sm:py-1.5 rounded-full text-xs hover:bg-gray-100 transition-colors">
-            Download
-          </button>
-          <button className="hidden sm:flex items-center gap-1.5 underline underline-offset-2 hover:text-gray-200 transition-colors text-xs">
-            <LocationIcon /><span>Select Location</span><ChevronDownIcon />
-          </button>
+    <div className="font-sans w-full shrink-0 bg-white">
+      {/* Announcement — hides on scroll */}
+      <div className={`chrome-collapse ${chromeHidden ? "is-collapsed" : ""}`} aria-hidden={chromeHidden}>
+        <div className="chrome-collapse-inner">
+          <div className="bg-[#2A2438] text-white text-[11px] sm:text-[12px]">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 flex items-center justify-between gap-3">
+              <p className="font-medium tracking-wide">FREE shipping on orders over ₹999!</p>
+              <div className="hidden sm:flex items-center gap-5 text-white/85">
+                <button type="button" className="hover:text-white transition-colors">For Business</button>
+                <button type="button" className="hover:text-white transition-colors inline-flex items-center gap-1">
+                  Help <ChevronDownIcon />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ── Main Navbar ── */}
-      <header className="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex items-center gap-3 sm:gap-6">
-
-          {/* Mobile filter */}
-          <button onClick={onOpenSidebar} className="md:hidden text-gray-500 hover:text-[#1A3A5C] transition-colors flex-shrink-0">
-            <FilterIcon />
-          </button>
-
-          {/* Logo */}
-          <button onClick={onLogoClick} className="flex-shrink-0">
-            <span className="text-xl sm:text-2xl font-black tracking-tight select-none">
-              <span className="text-[#1A3A5C]">dry</span>
-              <span className="text-[#E07B39]">fish</span>
-              <span className="text-[#1A3A5C] hidden sm:inline">.co</span>
-            </span>
-          </button>
-
-          {/* Search */}
-          <div className="flex-1 relative">
-            <span className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-gray-400"><SearchIcon /></span>
-            <input type="text" value={searchValue} onChange={e => setSearchValue(e.target.value)}
-              placeholder="Search dry fish products…"
-              className="w-full pl-9 sm:pl-11 pr-3 sm:pr-4 py-2 sm:py-3 rounded-full border border-gray-200 bg-gray-50 text-xs sm:text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1A3A5C]/20 focus:border-[#1A3A5C] transition-all" />
-          </div>
-
-          {/* ── Nav Actions ── */}
-          <nav className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-
-            {/* Fish Plus */}
-            <button className="hidden sm:flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#1A3A5C] transition-colors text-xs font-medium">
-              <div className="relative">
-                <span className="text-lg font-black leading-none">🐠</span>
-                <span className="absolute -top-1 -right-2 text-[9px] font-bold text-[#E07B39]">+</span>
-              </div>
-              <span>Fish Plus</span>
+      {/* Sticky: main header ALWAYS visible. Category strips toggle under it. */}
+      <div className="sticky top-0 z-[100] bg-white shadow-sm">
+        <header className="bg-white border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3 flex items-center gap-3 sm:gap-5">
+            {/* ☰ — click pe category strips show/hide (no side drawer) */}
+            <button
+              type="button"
+              onClick={handleMenuClick}
+              className="text-gray-900 hover:opacity-70 transition-opacity shrink-0"
+              aria-label={stripsVisible ? "Hide categories" : "Show categories"}
+              aria-expanded={stripsVisible}
+            >
+              {stripsVisible ? <CloseIcon /> : <MenuIcon />}
             </button>
 
-            {/* ── AUTH SECTION ── */}
-            {isLoggedIn ? (
-              /* Logged in: show avatar + dropdown */
-              <div className="relative">
-                <button
-                  onClick={() => setDropdownOpen(d => !d)}
-                  className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-                  title={user?.name || user?.email}
-                >
-                  {/* Avatar circle */}
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#1A3A5C] text-white flex items-center justify-center text-xs sm:text-sm font-bold select-none shadow-sm flex-shrink-0">
-                    {initials}
-                  </div>
-                  {/* Name on desktop */}
-                  <div className="hidden sm:flex flex-col items-start leading-tight">
-                    <span className="text-xs font-bold text-gray-800 max-w-[80px] truncate">{user?.name?.split(" ")[0] || "Account"}</span>
-                    <span className="text-[10px] text-gray-400">My Account</span>
-                  </div>
-                  <ChevronDownIcon />
-                </button>
+            <button onClick={onLogoClick} className="shrink-0" aria-label="dryCatch home">
+              <Logo />
+            </button>
 
-                {dropdownOpen && (
-                  <UserDropdown
-                    user={user}
-                    onLogout={handleLogout}
-                    onClose={() => setDropdownOpen(false)}
-                    onNavigate={onNavigate}
+            <div className="flex-1 relative max-w-xl lg:max-w-2xl">
+              <input
+                type="text"
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                placeholder="Search for a product"
+                className="w-full pl-4 pr-24 py-2.5 sm:py-3 rounded-full border border-gray-300 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-400"
+              />
+              <button
+                type="button"
+                className="hidden sm:block absolute right-1.5 top-1/2 -translate-y-1/2 bg-[#F4B740] hover:bg-[#e8a930] text-gray-900 text-sm font-bold px-5 py-2 rounded-full transition-colors"
+              >
+                Search
+              </button>
+            </div>
+
+            <nav className="flex items-center gap-4 sm:gap-5 shrink-0">
+              {isLoggedIn ? (
+                <div className="relative">
+                  <button
+                    onClick={() => setDropdownOpen((d) => !d)}
+                    className="flex items-center gap-1.5 text-gray-900 hover:opacity-70 transition-opacity"
+                    title={user?.name || user?.email}
+                  >
+                    <div className="w-7 h-7 rounded-full bg-[#1A3A5C] text-white flex items-center justify-center text-[11px] font-bold">
+                      {initials}
+                    </div>
+                    <span className="hidden sm:inline text-sm font-medium">Account</span>
+                  </button>
+                  {dropdownOpen && (
+                    <UserDropdown
+                      user={user}
+                      onLogout={handleLogout}
+                      onClose={() => setDropdownOpen(false)}
+                      onNavigate={onNavigate}
+                    />
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={onLoginClick}
+                  className="flex items-center gap-1.5 text-gray-900 hover:opacity-70 transition-opacity"
+                >
+                  <UserIcon />
+                  <span className="hidden sm:inline text-sm font-medium">Sign in</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => onNavigate("orders")}
+                className="hidden sm:flex items-center gap-1.5 text-gray-900 hover:opacity-70 transition-opacity"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span className="text-sm font-medium">Reorder</span>
+              </button>
+
+              <button
+                onClick={() => onNavigate("cart")}
+                className="relative flex items-center gap-1.5 text-gray-900 hover:opacity-70 transition-opacity"
+              >
+                <span className="relative">
+                  <CartIcon />
+                  {cartCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 bg-[#F4B740] text-gray-900 text-[10px] font-bold rounded-full min-w-4 h-4 flex items-center justify-center px-1">
+                      {cartCount > 99 ? "99+" : cartCount}
+                    </span>
+                  )}
+                </span>
+                <span className="hidden sm:inline text-sm font-medium">Cart</span>
+              </button>
+            </nav>
+          </div>
+        </header>
+
+        {/* Category strips — ☰ click se show/hide */}
+        <div
+          className={`chrome-collapse ${stripsVisible ? "" : "is-collapsed"}`}
+          aria-hidden={!stripsVisible}
+          onMouseLeave={() => setOpenMenuSlug(null)}
+        >
+          <div className="chrome-collapse-inner">
+            <div>
+              <div className="relative border-b border-gray-100 bg-white">
+                <div className="max-w-7xl mx-auto px-3 sm:px-6">
+                  <nav className="flex items-center justify-start sm:justify-center gap-5 sm:gap-6 lg:gap-8 overflow-x-auto scrollbar-hide">
+                    {PRIMARY_NAV.map((item) => {
+                      const active = openMenuSlug === item.slug;
+                      return (
+                        <button
+                          key={item.slug}
+                          type="button"
+                          onMouseEnter={() => stripsVisible && setOpenMenuSlug(item.slug)}
+                          onClick={() => {
+                            setOpenMenuSlug(null);
+                            onCategorySelect({ slug: item.slug, filter: item.filter, label: item.label });
+                          }}
+                          className="relative text-sm font-bold text-gray-900 py-3 whitespace-nowrap hover:opacity-70 transition-opacity"
+                        >
+                          {item.label}
+                          <span
+                            className={`absolute left-0 right-0 bottom-0 h-[3px] bg-[#F4B740] transition-opacity ${
+                              active ? "opacity-100" : "opacity-0"
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </div>
+
+                {stripsVisible && openMenuSlug && (
+                  <MegaMenu
+                    menu={getMegaMenu(openMenuSlug)}
+                    onNavigate={onCategorySelect}
+                    onClose={() => setOpenMenuSlug(null)}
                   />
                 )}
               </div>
-            ) : (
-              /* Not logged in: show Login + Sign Up buttons */
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <button
-                  onClick={onLoginClick}
-                  className="text-xs sm:text-sm font-semibold text-[#1A3A5C] border border-[#1A3A5C] px-3 sm:px-4 py-1.5 sm:py-2 rounded-full hover:bg-[#EAF1FA] transition-all active:scale-[0.97]"
-                >
-                  Login
-                </button>
-                <button
-                  onClick={onLoginClick}
-                  className="text-xs sm:text-sm font-semibold text-white bg-[#E07B39] px-3 sm:px-4 py-1.5 sm:py-2 rounded-full hover:bg-[#c96a2c] transition-all active:scale-[0.97] shadow-sm hidden sm:block"
-                >
-                  Sign Up
-                </button>
-              </div>
-            )}
 
-            {/* Wishlist */}
-            {isLoggedIn && (
-              <button onClick={() => onNavigate("wishlist")}
-                className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#1A3A5C] transition-colors text-xs font-medium">
-                <div className="relative">
-                  <WishlistIcon />
+              <div className="bg-[#F3E9D8] border-b border-[#E8DCC8]">
+                <div className="max-w-7xl mx-auto px-6">
+                  <nav className="flex items-center justify-center gap-0 py-2 overflow-x-auto scrollbar-hide">
+                    {SECONDARY_NAV.map((item, i) => (
+                      <div key={item.label} className="flex items-center">
+                        {i > 0 && <span className="text-gray-300 px-2.5 select-none">|</span>}
+                        <button
+                          type="button"
+                          onClick={() => onCategorySelect(item)}
+                          className="text-[12px] text-gray-700 hover:text-gray-900 transition-colors whitespace-nowrap px-1"
+                        >
+                          {item.label}
+                        </button>
+                      </div>
+                    ))}
+                  </nav>
                 </div>
-                <span className="hidden sm:block">Wishlist</span>
-              </button>
-            )}
-
-            {/* Cart */}
-            <button onClick={() => onNavigate("cart")}
-              className="relative flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#1A3A5C] transition-colors text-xs font-medium">
-              <div className="relative">
-                <CartIcon />
-                {cartCount > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-[#E07B39] text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 shadow">
-                    {cartCount > 99 ? "99+" : cartCount}
-                  </span>
-                )}
               </div>
-              <span className="hidden sm:block">Cart</span>
-            </button>
-          </nav>
+            </div>
+          </div>
         </div>
-      </header>
+      </div>
 
-      {/* Cart Drawer */}
       {cartOpen && (
         <CartDrawer
           cart={cart}
