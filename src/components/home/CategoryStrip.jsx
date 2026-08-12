@@ -9,17 +9,17 @@ export default function CategoryStrip({ categories, onSelect }) {
             <button
               key={cat.label}
               onClick={() => onSelect(cat)}
-              className="flex flex-col items-center gap-2 flex-shrink-0 group w-16 sm:w-24"
+              className="flex flex-col items-center gap-2 flex-shrink-0 group w-24 sm:w-40"
             >
               <span
-                className="w-16 h-16 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-2xl sm:text-4xl overflow-hidden group-hover:scale-105 transition-all"
+                className="w-24 h-24 sm:w-40 sm:h-40 rounded-full flex items-center justify-center text-4xl sm:text-6xl overflow-hidden group-hover:scale-105 transition-all"
                 style={{ background: cat.bg || "#F5EDE0" }}
               >
                 {cat.image
                   ? <img src={cat.image} alt="" className="w-full h-full object-cover" />
                   : cat.emoji}
               </span>
-              <span className="text-[11px] sm:text-sm font-bold text-gray-900 text-center leading-tight group-hover:text-[#E07B39] transition-colors">
+              <span className="text-sm sm:text-lg font-bold text-gray-900 text-center leading-tight group-hover:text-[#E07B39] transition-colors">
                 {cat.label}
               </span>
             </button>

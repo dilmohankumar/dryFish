@@ -4,7 +4,7 @@ export default function Logo({ className = "", showCharacters = true }) {
   return (
     <span className={`inline-flex items-end gap-1.5 sm:gap-2 select-none ${className}`}>
       <span className="font-logo text-[1.65rem] sm:text-[2.05rem] leading-none tracking-tight text-gray-900">
-        dryCatch<span className="text-[0.85em]">.co</span>
+        dryCatch
       </span>
       {showCharacters && (
         <span className="hidden sm:inline-flex items-end gap-0.5 pb-0.5" aria-hidden="true">

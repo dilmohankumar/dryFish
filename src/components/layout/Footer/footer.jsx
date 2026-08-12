@@ -49,7 +49,7 @@ export default function Footer() {
             100% Committed to Our Customers
           </h3>
           <p className="text-sm text-white/60 leading-relaxed max-w-md">
-            At drycatch.co, customer satisfaction is our top priority. If you
+            At drycatch, customer satisfaction is our top priority. If you
             experience a problem with our products, service, or shipping,
             please let us know — we'll do whatever it takes to make it right.
           </p>
@@ -117,8 +117,8 @@ export default function Footer() {
               <li key={item}><a href="#" className="hover:text-white transition-colors">{item}</a></li>
             ))}
             <li>
-              <a href="mailto:hello@drycatch.co" className="flex items-center gap-2 hover:text-white transition-colors">
-                <MailIcon /> hello@drycatch.co
+              <a href="mailto:hello@drycatch" className="flex items-center gap-2 hover:text-white transition-colors">
+                <MailIcon /> hello@drycatch
               </a>
             </li>
           </ul>
@@ -145,7 +145,7 @@ export default function Footer() {
       <div className="border-t border-white/10">
         <div className="max-w-7xl mx-auto px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-white/40">
-            <span>Copyright © 2026 drycatch.co. All rights reserved.</span>
+            <span>Copyright © 2026 drycatch. All rights reserved.</span>
             <a href="#" className="hover:text-white/70">Privacy Policy</a>
             <a href="#" className="hover:text-white/70">Terms &amp; Conditions</a>
             <a href="#" className="hover:text-white/70">Do Not Sell My Personal Information</a>

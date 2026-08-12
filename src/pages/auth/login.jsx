@@ -244,7 +244,7 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
             </button>
 
             <p className="text-center text-sm text-gray-500">
-              New to drycatch.co?{" "}
+              New to drycatch?{" "}
               <button type="button" onClick={onGoToSignup} className="text-[#E07B39] font-bold hover:underline">Create account</button>
             </p>
           </form>

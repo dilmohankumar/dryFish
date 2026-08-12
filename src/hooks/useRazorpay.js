@@ -1,8 +1,4 @@
-// src/hooks/useRazorpay.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Razorpay integration with AUTH GUARD
-// If df_token not in localStorage → calls onAuthRequired (redirect to /login)
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 import { toast } from "sonner";
 
@@ -20,24 +16,16 @@ function loadRazorpayScript() {
   });
 }
 
-// ───────────────────
-// openRazorpay({
-//   product, variant, qty,
-//   onSuccess, onFailure,
-//   onAuthRequired,    
-//   customDescription,
-// })
-// ────────────────────
 export async function openRazorpay({
   product,
   variant,
   qty = 1,
   onSuccess,
   onFailure,
-  onAuthRequired,       // ← redirect to /login
+  onAuthRequired,    
   customDescription,
 }) {
-  // ── AUTH GUARD — check df_token ─────────────────────────────────────────
+  // ── AUTH GUARD — check df_token ──
   const token = localStorage.getItem("df_token");
   if (!token) {
     // Not logged in → redirect to login
@@ -79,7 +67,7 @@ export async function openRazorpay({
     key: RAZORPAY_KEY,
     amount: totalPaise,
     currency: "INR",
-    name: "drycatch.co",
+    name: "drycatch",
     description: customDescription || `${product.name} — ${variant.label} × ${qty}`,
     image: "/logo.png",
     // order_id,  // ← uncomment when backend is ready

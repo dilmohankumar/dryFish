@@ -13,28 +13,159 @@ import Checkout from "../pages/checkout.jsx";
 import Orders from "../pages/orders.jsx";
 import Wishlist from "../pages/wishlist.jsx";
 import Profile from "../pages/profile.jsx";
-import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { PRODUCTS } from "../pages/productGrid.jsx";
+import {
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+  useSearchParams,
+  useLocation,
+} from "react-router-dom";
 import { userAPI } from "../utils/api.js";
 import { getMegaMenu } from "../data/megaMenu.js";
+
+// ── Path builders (pure — no hooks) ─────────────────────────────────────────
+// Shared by every "go to X" call site so the URL a click lands on and the
+// params a route reads back out always agree.
+function buildShopPath(category = "All") {
+  return category && category !== "All" ? `/shop?category=${encodeURIComponent(category)}` : "/shop";
+}
+
+function buildCategoryPath(payload = {}) {
+  const slug = payload.slug || "featured-new";
+  const menu = getMegaMenu(slug);
+  const filter = payload.filter || menu?.filter || "All";
+  const label = payload.label || menu?.label || null;
+  const params = new URLSearchParams();
+  params.set("filter", filter);
+  if (payload.tag) params.set("tag", payload.tag);
+  if (label) params.set("label", label);
+  return `/category/${slug}?${params.toString()}`;
+}
+
+// ── Route-level wrappers ─────────────────────────────────────────────────
+// Thin adapters that pull params/search-params/location.state out of the URL
+// and hand the existing page components the same props they always expected.
+
+function ShopRoute({
+  cart, cartInc, cartDec, cartFirstAdd,
+  sidebarOpen, setSidebarOpen,
+  selectedSort, setSelectedSort,
+  selectedCats, setSelectedCats,
+  selectedOrigins, setSelectedOrigins,
+  clearFilters, onProductClick, onBackToHome,
+}) {
+  const [searchParams] = useSearchParams();
+  const category = searchParams.get("category") || "All";
+
+  return (
+    <div className="flex flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-5 sm:gap-8">
+      <Sidebar
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        selectedSort={selectedSort}
+        onSortChange={setSelectedSort}
+        selectedCats={selectedCats}
+        onCatChange={setSelectedCats}
+        selectedOrigins={selectedOrigins}
+        onOriginChange={setSelectedOrigins}
+        onClearAll={clearFilters}
+      />
+      <main className="flex-1 min-w-0">
+        <Shop
+          key={category}
+          selectedSort={selectedSort}
+          selectedCats={selectedCats}
+          selectedOrigins={selectedOrigins}
+          cart={cart}
+          onProductClick={onProductClick}
+          onInc={cartInc}
+          onDec={cartDec}
+          onFirstAdd={cartFirstAdd}
+          onOpenSidebar={() => setSidebarOpen(true)}
+          onBackToHome={onBackToHome}
+          initialCategory={category}
+        />
+      </main>
+    </div>
+  );
+}
+
+function CategoryRoute({ cart, onInc, onDec, onFirstAdd, onProductClick, onBackToHome, onNavigateCategory }) {
+  const { slug } = useParams();
+  const [searchParams] = useSearchParams();
+  const menu = getMegaMenu(slug);
+  const filter = searchParams.get("filter") || menu?.filter || "All";
+  const tag = searchParams.get("tag") || null;
+  const label = searchParams.get("label") || null;
+
+  return (
+    <div className="flex-1">
+      <CategoryPage
+        key={`${slug}-${filter}-${tag || ""}-${label || ""}`}
+        slug={slug}
+        filter={filter}
+        tag={tag}
+        highlightLabel={label}
+        cart={cart}
+        onInc={onInc}
+        onDec={onDec}
+        onFirstAdd={onFirstAdd}
+        onProductClick={onProductClick}
+        onBackToHome={onBackToHome}
+        onNavigateCategory={onNavigateCategory}
+      />
+    </div>
+  );
+}
+
+function ProductDetailRoute({ cart, onCartInc, onCartDec, onCartFirstAdd }) {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const product = PRODUCTS.find((p) => p.id === Number(id));
+
+  return (
+    <div className="flex-1">
+      <ProductDetail
+        product={product}
+        onBack={() => navigate(-1)}
+        cart={cart}
+        onCartInc={onCartInc}
+        onCartDec={onCartDec}
+        onCartFirstAdd={onCartFirstAdd}
+      />
+    </div>
+  );
+}
+
+function CheckoutRoute() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const checkoutData = location.state;
+
+  // Direct/refresh visits to /checkout carry no cart snapshot — bounce to cart.
+  if (!checkoutData) return <Navigate to="/cart" replace />;
+
+  return (
+    <div className="flex-1">
+      <Checkout
+        cartItems={checkoutData.items}
+        total={checkoutData.total}
+        onBack={() => navigate("/cart")}
+      />
+    </div>
+  );
+}
 
 function StoreLayout({ user, onLogout, onLoginClick }) {
   const [selectedSort, setSelectedSort] = useState(null);
   const [selectedCats, setSelectedCats] = useState([]);
   const [selectedOrigins, setSelectedOrigins] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
   const [cart, setCart] = useState({});
   const navigate = useNavigate();
-  const [currentPage, setCurrentPage] = useState("home");
-  const [checkoutData, setCheckoutData] = useState(null);
-  const [shopCategory, setShopCategory] = useState("All");
-  // Category rough-page state (mega menu / primary nav destinations)
-  const [categoryState, setCategoryState] = useState({
-    slug: "dry-prawns",
-    filter: "Prawns",
-    tag: null,
-    label: null,
-  });
 
   const cartInc = useCallback(id => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })), []);
   const cartDec = useCallback(id => setCart(c => { const n = (c[id] || 1) - 1; return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n }; }), []);
@@ -42,30 +173,11 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
   const cartRemove = useCallback(id => setCart(c => ({ ...c, [id]: 0 })), []);
   const clearFilters = () => { setSelectedSort(null); setSelectedCats([]); setSelectedOrigins([]); };
 
-  const handleCheckout = (items, total) => {
-    setCheckoutData({ items, total });
-    setCurrentPage("checkout");
-  };
-
   // ── Navigation helpers ──────────────────────────────────────────────────
-  const goHome = () => { setCurrentPage("home"); setSelectedProduct(null); };
-  const goShop = (category = "All") => {
-    setShopCategory(category);
-    setCurrentPage("shop");
-    setSelectedProduct(null);
-  };
-  const goCategory = (payload = {}) => {
-    const slug = payload.slug || "featured-new";
-    const menu = getMegaMenu(slug);
-    setCategoryState({
-      slug,
-      filter: payload.filter || menu?.filter || "All",
-      tag: payload.tag || null,
-      label: payload.label || null,
-    });
-    setCurrentPage("category");
-    setSelectedProduct(null);
-  };
+  const goHome = () => navigate("/");
+  const goShop = (category = "All") => navigate(buildShopPath(category));
+  const goCategory = (payload = {}) => navigate(buildCategoryPath(payload));
+  const goProduct = (product) => navigate(`/product/${product.id}`);
   const handleCategorySelect = (cat) => {
     if (cat?.slug) {
       return goCategory({
@@ -78,6 +190,7 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
     // Fallback for older callers that only pass a filter string/object
     goShop(cat?.filter || "All");
   };
+  const handleCheckout = (items, total) => navigate("/checkout", { state: { items, total } });
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
@@ -91,110 +204,66 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
         user={user}
         onLoginClick={onLoginClick}
         onLogout={onLogout}
-        onNavigate={setCurrentPage}
+        onNavigate={(page) => navigate(`/${page}`)}
         onCategorySelect={handleCategorySelect}
       />
 
-      {currentPage === "checkout" && checkoutData ? (
-        <div className="flex-1">
-          <Checkout
-            cartItems={checkoutData.items}
-            total={checkoutData.total}
-            onBack={() => {
-              setCurrentPage("cart");
-              setCheckoutData(null);
-            }}
-          />
-        </div>
-      ) : currentPage === "cart" ? (
-        <div className="flex-1">
-          <Cart
-            onCheckout={handleCheckout}
-          />
-        </div>
-      ) : currentPage === "orders" ? (
-        <div className="flex-1">
-          <Orders />
-        </div>
-      ) : currentPage === "wishlist" ? (
-        <div className="flex-1">
-          <Wishlist />
-        </div>
-      ) : currentPage === "profile" ? (
-        <div className="flex-1">
-          <Profile />
-        </div>
-      ) : selectedProduct ? (
-        <div className="flex-1">
-          <ProductDetail
-            product={selectedProduct}
-            onBack={() => setSelectedProduct(null)}
-            cart={cart}
-            onCartInc={cartInc}
-            onCartDec={cartDec}
-            onCartFirstAdd={cartFirstAdd}
-          />
-        </div>
-      ) : currentPage === "category" ? (
-        <div className="flex-1">
-          <CategoryPage
-            key={`${categoryState.slug}-${categoryState.filter}-${categoryState.tag || ""}-${categoryState.label || ""}`}
-            slug={categoryState.slug}
-            filter={categoryState.filter}
-            tag={categoryState.tag}
-            highlightLabel={categoryState.label}
-            cart={cart}
-            onInc={cartInc}
-            onDec={cartDec}
-            onFirstAdd={cartFirstAdd}
-            onProductClick={setSelectedProduct}
-            onBackToHome={goHome}
-            onNavigateCategory={goCategory}
-          />
-        </div>
-      ) : currentPage === "shop" ? (
-        <div className="flex flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6 gap-5 sm:gap-8">
-          <Sidebar
-            open={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-            selectedSort={selectedSort}
-            onSortChange={setSelectedSort}
-            selectedCats={selectedCats}
-            onCatChange={setSelectedCats}
-            selectedOrigins={selectedOrigins}
-            onOriginChange={setSelectedOrigins}
-            onClearAll={clearFilters}
-          />
-          <main className="flex-1 min-w-0">
-            <Shop
-              key={shopCategory}
-              selectedSort={selectedSort}
-              selectedCats={selectedCats}
-              selectedOrigins={selectedOrigins}
-              cart={cart}
-              onProductClick={setSelectedProduct}
-              onInc={cartInc}
-              onDec={cartDec}
-              onFirstAdd={cartFirstAdd}
-              onOpenSidebar={() => setSidebarOpen(true)}
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <div className="flex-1">
+              <Home
+                cart={cart}
+                onInc={cartInc}
+                onDec={cartDec}
+                onFirstAdd={cartFirstAdd}
+                onProductClick={goProduct}
+                onShopNow={() => goCategory({ slug: "featured-new", filter: "All", label: "Featured & New" })}
+                onCategorySelect={handleCategorySelect}
+              />
+            </div>
+          }
+        />
+        <Route
+          path="/shop"
+          element={
+            <ShopRoute
+              cart={cart} cartInc={cartInc} cartDec={cartDec} cartFirstAdd={cartFirstAdd}
+              sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}
+              selectedSort={selectedSort} setSelectedSort={setSelectedSort}
+              selectedCats={selectedCats} setSelectedCats={setSelectedCats}
+              selectedOrigins={selectedOrigins} setSelectedOrigins={setSelectedOrigins}
+              clearFilters={clearFilters}
+              onProductClick={goProduct}
               onBackToHome={goHome}
-              initialCategory={shopCategory}
             />
-          </main>
-        </div>
-      ) : (
-        <div className="flex-1">
-          <Home
-            cart={cart}
-            onInc={cartInc}
-            onDec={cartDec}
-            onFirstAdd={cartFirstAdd}
-            onProductClick={setSelectedProduct}
-            onShopNow={() => goCategory({ slug: "featured-new", filter: "All", label: "Featured & New" })}
-            onCategorySelect={handleCategorySelect}
-          />
-        </div>
-      )}
+          }
+        />
+        <Route
+          path="/category/:slug"
+          element={
+            <CategoryRoute
+              cart={cart} onInc={cartInc} onDec={cartDec} onFirstAdd={cartFirstAdd}
+              onProductClick={goProduct} onBackToHome={goHome} onNavigateCategory={goCategory}
+            />
+          }
+        />
+        <Route
+          path="/product/:id"
+          element={
+            <ProductDetailRoute
+              cart={cart} onCartInc={cartInc} onCartDec={cartDec} onCartFirstAdd={cartFirstAdd}
+            />
+          }
+        />
+        <Route path="/cart" element={<div className="flex-1"><Cart onCheckout={handleCheckout} /></div>} />
+        <Route path="/checkout" element={<CheckoutRoute />} />
+        <Route path="/orders" element={<div className="flex-1"><Orders /></div>} />
+        <Route path="/wishlist" element={<div className="flex-1"><Wishlist /></div>} />
+        <Route path="/profile" element={<div className="flex-1"><Profile /></div>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
 
       <Footer />
     </div>
