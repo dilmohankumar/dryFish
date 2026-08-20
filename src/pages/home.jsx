@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import PromoGrid from "../components/home/PromoGrid";
 import CategoryStrip from "../components/home/CategoryStrip";
 import HeroBanner from "../components/home/HeroBanner";
@@ -9,29 +10,18 @@ import Testimonials from "../components/home/Testimonials";
 import FeaturedIn from "../components/home/FeaturedIn";
 import ShopByType from "../components/home/ShopByType";
 import BrandStory from "../components/home/BrandStory";
-import { PRODUCTS } from "./productGrid";
+import BlockRenderer from "../components/cms/BlockRenderer.jsx";
+import { productsAPI, contentAPI } from "../utils/api";
+import { normalizeProducts } from "../utils/productAdapters";
+import { cacheProducts } from "../utils/productCache";
 import { NAV_CATEGORIES, TRUST_POINTS, CATCH_TYPES, TESTIMONIALS, FEATURED_IN } from "../data/homeData";
+import { useSEO } from "../hooks/useSEO.js";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Home — storefront landing page, laid out to match the current nuts.com flow:
-// promo grid → category circles → amber "greatest hits" + carousel → trust
-// → customize → testimonials → press → shop by type → combos → brand story.
-// Driven by DEMO data for now; click behaviour is wired via StoreLayout.
-// ─────────────────────────────────────────────────────────────────────────────
-export default function Home({
-  cart = {},
-  onInc = () => {},
-  onDec = () => {},
-  onFirstAdd = () => {},
-  onProductClick = () => {},
-  onShopNow = () => {},
-  onCategorySelect = () => {},
-}) {
-  const bestsellers = PRODUCTS.filter((p) => p.bestseller);
+
+function DefaultHome({ cart, onInc, onDec, onFirstAdd, onProductClick, onShopNow, onCategorySelect, bestsellers }) {
   const AMBER = "#F0A63C";
-
   return (
-    <div className="flex-1 min-w-0 w-full bg-white">
+    <>
       {/* 1. Promo grid hero (large left + 2 stacked right) */}
       <PromoGrid onShopNow={onShopNow} />
 
@@ -68,6 +58,89 @@ export default function Home({
       <ShopByType types={CATCH_TYPES} onSelect={onCategorySelect} onExploreMore={onShopNow} />
 
       <BrandStory onShopNow={onShopNow} />
+    </>
+  );
+}
+
+export default function Home({
+  cart = {},
+  onInc = () => {},
+  onDec = () => {},
+  onFirstAdd = () => {},
+  onProductClick = () => {},
+  onShopNow = () => {},
+  onCategorySelect = () => {},
+}) {
+  const [bestsellers, setBestsellers] = useState([]);
+  const [cmsBlocks, setCmsBlocks] = useState(null); // null = still loading, [] = loaded-but-empty
+  const [cmsSeo, setCmsSeo] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    productsAPI
+      .getFeatured()
+      .then((data) => {
+        if (cancelled) return;
+        const normalized = normalizeProducts(data.products || []);
+        cacheProducts(normalized);
+        setBestsellers(normalized);
+      })
+      .catch(() => {
+        if (!cancelled) setBestsellers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    contentAPI
+      .getHomepage()
+      .then((data) => {
+        if (cancelled) return;
+        setCmsBlocks(Array.isArray(data.blocks) ? data.blocks : []);
+        setCmsSeo(data.seo || null);
+      })
+      .catch(() => {
+        if (!cancelled) setCmsBlocks([]); // CMS unreachable — fall back to the default homepage
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Phase 23 — centralized metadata (replaces the previous manual title/
+  // meta-description effect) + Organization/WebSite structured data, since
+  // the homepage is the natural place for site-wide schema.org markup.
+  useSEO({
+    title: cmsSeo?.title || "DryCatch — Coastal Dry Catch, Delivered",
+    description: cmsSeo?.metaDescription,
+    canonical: "/",
+    jsonLd: [
+      { "@context": "https://schema.org", "@type": "Organization", name: "DryCatch", url: window.location.origin },
+      { "@context": "https://schema.org", "@type": "WebSite", name: "DryCatch", url: window.location.origin },
+    ],
+  });
+
+  const hasCmsContent = Array.isArray(cmsBlocks) && cmsBlocks.length > 0;
+
+  return (
+    <div className="flex-1 min-w-0 w-full bg-white">
+      {hasCmsContent ? (
+        <BlockRenderer blocks={cmsBlocks} />
+      ) : (
+        <DefaultHome
+          cart={cart}
+          onInc={onInc}
+          onDec={onDec}
+          onFirstAdd={onFirstAdd}
+          onProductClick={onProductClick}
+          onShopNow={onShopNow}
+          onCategorySelect={onCategorySelect}
+          bestsellers={bestsellers}
+        />
+      )}
     </div>
   );
 }

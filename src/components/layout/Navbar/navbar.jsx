@@ -1,12 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { openRazorpay } from "../../../hooks/useRazorpay.js";
-import { PRODUCTS } from "../../../pages/productGrid.jsx";
-import { apiGetMe } from "../../../utils/auth.js";
+import { useState, useEffect, useRef } from "react";
 import { PRIMARY_NAV } from "../../../data/megaMenu.js";
 import { SECONDARY_NAV } from "../../../data/homeData.js";
 import { getMegaMenu } from "../../../data/megaMenu.js";
 import Logo from "../Logo.jsx";
 import MegaMenu from "./MegaMenu.jsx";
+import SearchBar from "./SearchBar.jsx";
+import NotificationBell from "../../notifications/NotificationBell.jsx";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const SearchIcon = () => (
@@ -66,6 +65,36 @@ const ChevronDownIcon = () => (
       strokeLinejoin="round"
       strokeWidth={2}
       d="M19 9l-7 7-7-7"
+    />
+  </svg>
+);
+const ChevronLeftIcon = () => (
+  <svg
+    className="w-3.5 h-3.5"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2.5}
+      d="M15 19l-7-7 7-7"
+    />
+  </svg>
+);
+const ChevronRightIcon = () => (
+  <svg
+    className="w-3.5 h-3.5"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2.5}
+      d="M9 5l7 7-7 7"
     />
   </svg>
 );
@@ -206,64 +235,18 @@ const OrdersIcon = () => (
 );
 
 // ── Cart Drawer ────────────────────────────────────────────────────────────
-function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
-  const [checkoutStatus, setCheckoutStatus] = useState("idle");
-
-  const cartItems = Object.entries(cart)
-    .filter(([, qty]) => qty > 0)
-    .map(([id, qty]) => {
-      const product = PRODUCTS.find((p) => p.id === Number(id));
-      return product ? { product, qty, variant: product.variants[0] } : null;
-    })
-    .filter(Boolean);
-
-  const subtotal = cartItems.reduce(
-    (s, { variant, qty }) => s + variant.price * qty,
-    0,
-  );
-  const totalMrp = cartItems.reduce(
-    (s, { variant, qty }) => s + variant.mrp * qty,
-    0,
-  );
-  const savings = totalMrp - subtotal;
-  const delivery = subtotal >= 500 ? 0 : 49;
+// items/summary come straight from the server (GET /cart) — see
+// cartService.getCartSummary — never reconstructed from a client-side
+// product cache. Price/subtotal/availability are all backend-authoritative.
+function CartDrawer({ items = [], summary, onInc, onDec, onRemove, onClose, onGoToCart }) {
+  const subtotal = summary?.subtotal ?? 0;
+  const delivery = subtotal >= 500 || subtotal === 0 ? 0 : 49;
   const grandTotal = subtotal + delivery;
 
-  const handleCheckout = useCallback(async () => {
-    if (cartItems.length === 0 || checkoutStatus === "paying") return;
-    setCheckoutStatus("paying");
-    const description = cartItems
-      .map(({ product, qty }) => `${product.name} ×${qty}`)
-      .join(", ");
-    try {
-      await openRazorpay({
-        product: { id: "cart", name: "drycatch Order" },
-        variant: {
-          label: `${cartItems.length} items`,
-          price: grandTotal,
-          mrp: grandTotal,
-        },
-        qty: 1,
-        customDescription: description,
-        onSuccess: () => {
-          setCheckoutStatus("success");
-          setTimeout(() => {
-            onClose();
-            setCheckoutStatus("idle");
-          }, 2000);
-        },
-        onFailure: (err) => {
-          if (err?.reason === "dismissed") setCheckoutStatus("idle");
-          else {
-            setCheckoutStatus("failed");
-            setTimeout(() => setCheckoutStatus("idle"), 2000);
-          }
-        },
-      });
-    } catch {
-      setCheckoutStatus("idle");
-    }
-  }, [cartItems, grandTotal, checkoutStatus, onClose]);
+  const handleCheckout = () => {
+    onClose();
+    onGoToCart();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -277,9 +260,9 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
           <div className="flex items-center gap-2">
             <CartIcon />
             <h2 className="text-base font-bold text-gray-900">Your Cart</h2>
-            {cartItems.length > 0 && (
+            {items.length > 0 && (
               <span className="bg-[#1A3A5C] text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                {cartItems.length}
+                {items.length}
               </span>
             )}
           </div>
@@ -318,7 +301,7 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
 
         {/* Items */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {cartItems.length === 0 ? (
+          {items.length === 0 ? (
             <div className="text-center py-20">
               <div className="text-5xl mb-4">🛒</div>
               <p className="text-gray-500 font-medium">Your cart is empty</p>
@@ -333,52 +316,54 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
               </button>
             </div>
           ) : (
-            cartItems.map(({ product, qty, variant }) => (
+            items.map((item) => (
               <div
-                key={product.id}
+                key={item.id}
                 className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl"
               >
-                <div
-                  className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl flex-shrink-0 shadow-sm"
-                  style={{ background: product.bg }}
-                >
-                  {product.emoji}
+                <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 shadow-sm bg-gray-100">
+                  {item.image && <img src={item.image} alt="" className="w-full h-full object-cover" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-bold text-gray-800 truncate">
-                    {product.name}
+                    {item.productName}
                   </p>
                   <p className="text-[10px] text-gray-400 mt-0.5">
-                    {variant.label}
+                    {item.variantLabel}
                   </p>
+                  {item.availability !== "IN_STOCK" && (
+                    <p className="text-[10px] font-semibold text-amber-600 mt-0.5">
+                      {item.availability === "OUT_OF_STOCK" && "Out of stock"}
+                      {item.availability === "INSUFFICIENT_STOCK" && `Only ${item.maxAvailable} available`}
+                      {item.availability === "LOW_STOCK" && "Low stock"}
+                      {(item.availability === "PRODUCT_UNAVAILABLE" || item.availability === "VARIANT_UNAVAILABLE") && "No longer available"}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-sm font-extrabold text-gray-900">
-                      ₹{variant.price * qty}
-                    </span>
-                    <span className="text-[10px] text-gray-400 line-through">
-                      ₹{variant.mrp * qty}
+                      ₹{item.lineSubtotal}
                     </span>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                   <button
-                    onClick={() => onRemove(product.id)}
+                    onClick={() => onRemove(item.variantId)}
                     className="text-gray-300 hover:text-red-400 transition-colors"
                   >
                     <TrashIcon />
                   </button>
                   <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2 py-1">
                     <button
-                      onClick={() => onDec(product.id)}
+                      onClick={() => onDec(item.variantId)}
                       className="text-gray-500 hover:text-[#1A3A5C] transition-colors"
                     >
                       <MinusIcon />
                     </button>
                     <span className="text-xs font-bold w-4 text-center tabular-nums">
-                      {qty}
+                      {item.quantity}
                     </span>
                     <button
-                      onClick={() => onInc(product.id)}
+                      onClick={() => onInc(item.variantId)}
                       className="text-gray-500 hover:text-[#1A3A5C] transition-colors"
                     >
                       <PlusIcon />
@@ -391,22 +376,16 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
         </div>
 
         {/* Summary + checkout */}
-        {cartItems.length > 0 && (
+        {items.length > 0 && (
           <div className="border-t border-gray-100 px-5 py-4 flex-shrink-0 space-y-3">
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between text-gray-500">
                 <span>
-                  Subtotal ({cartItems.reduce((s, { qty }) => s + qty, 0)}{" "}
+                  Subtotal ({items.reduce((s, i) => s + i.quantity, 0)}{" "}
                   items)
                 </span>
                 <span className="font-semibold text-gray-800">₹{subtotal}</span>
               </div>
-              {savings > 0 && (
-                <div className="flex justify-between text-green-600 text-xs">
-                  <span>You save</span>
-                  <span className="font-semibold">−₹{savings}</span>
-                </div>
-              )}
               <div className="flex justify-between text-gray-500">
                 <span>Delivery</span>
                 <span
@@ -422,55 +401,11 @@ function CartDrawer({ cart, onInc, onDec, onRemove, onClose }) {
             </div>
             <button
               onClick={handleCheckout}
-              disabled={checkoutStatus === "paying"}
-              className={`w-full flex items-center justify-center gap-2 font-bold py-3.5 rounded-2xl text-sm transition-all active:scale-[0.98] shadow-lg
-                ${
-                  checkoutStatus === "success"
-                    ? "bg-green-500 text-white"
-                    : checkoutStatus === "paying"
-                      ? "bg-[#1A3A5C]/60 text-white cursor-not-allowed"
-                      : checkoutStatus === "failed"
-                        ? "bg-red-500 text-white"
-                        : "bg-[#E07B39] text-white hover:bg-[#c96a2c]"
-                }`}
+              className="w-full flex items-center justify-center gap-2 font-bold py-3.5 rounded-2xl text-sm transition-all active:scale-[0.98] shadow-lg bg-[#E07B39] text-white hover:bg-[#c96a2c]"
             >
-              {checkoutStatus === "paying" ? (
-                <>
-                  <svg
-                    className="w-4 h-4 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Opening Payment…
-                </>
-              ) : checkoutStatus === "success" ? (
-                "✓ Order Placed!"
-              ) : checkoutStatus === "failed" ? (
-                "Payment Failed — Retry"
-              ) : (
-                <>
-                  <BoltIcon />
-                  Pay ₹{grandTotal} · Checkout
-                </>
-              )}
+              <BoltIcon />
+              View Cart · ₹{grandTotal}
             </button>
-            <p className="text-center text-[10px] text-gray-400">
-              🔒 Secured by Razorpay · UPI · Cards · Net Banking · Wallets
-            </p>
           </div>
         )}
       </div>
@@ -581,6 +516,8 @@ function UserDropdown({ user, onLogout, onClose, onNavigate }) {
 export default function Navbar({
   onOpenSidebar,
   cart = {},
+  cartItems = [],
+  cartSummary,
   onCartInc,
   onCartDec,
   onCartRemove,
@@ -589,8 +526,8 @@ export default function Navbar({
   onLogout,
   onNavigate,
   onCategorySelect = () => {},
+  user = null,
 }) {
-  const [searchValue, setSearchValue] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [openMenuSlug, setOpenMenuSlug] = useState(null);
@@ -605,79 +542,11 @@ export default function Navbar({
   const fixedHeaderRef = useRef(null);
   const [fixedHeaderHeight, setFixedHeaderHeight] = useState(0);
 
-  // ── Read token + user from localStorage ─────────────────────────────────
-  const [user, setUser] = useState(() => {
-    const token = localStorage.getItem("df_token");
-    if (!token) return null;
-    // Try to get cached user info
-    try {
-      const cached = localStorage.getItem("df_user");
-      return cached ? JSON.parse(cached) : { email: "" }; // minimal logged-in state
-    } catch {
-      return { email: "" };
-    }
-  });
-
-  // Fetch /me on mount if token exists but user data is incomplete
-  useEffect(() => {
-    const token = localStorage.getItem("df_token");
-    if (!token) {
-      setUser(null);
-      return;
-    }
-    // Only fetch if we don't have full user data
-    const cached = localStorage.getItem("df_user");
-    if (cached) {
-      try {
-        setUser(JSON.parse(cached));
-        return;
-      } catch {}
-    }
-    // Fetch from API
-    apiGetMe(token)
-      .then((data) => {
-        const userData = data.user || data;
-        setUser(userData);
-        localStorage.setItem("df_user", JSON.stringify(userData));
-      })
-      .catch(() => {
-        // Token invalid — clear and show login
-        localStorage.removeItem("df_token");
-        localStorage.removeItem("df_user");
-        setUser(null);
-      });
-  }, []);
-
-  // Listen for login/logout events from other pages (e.g. Login page sets token)
-  useEffect(() => {
-    const handleStorage = () => {
-      const token = localStorage.getItem("df_token");
-      if (!token) {
-        setUser(null);
-        return;
-      }
-      try {
-        const cached = localStorage.getItem("df_user");
-        if (cached) setUser(JSON.parse(cached));
-      } catch {}
-    };
-    window.addEventListener("storage", handleStorage);
-    // Also poll briefly after mount in case Login.jsx just set the token
-    const id = setInterval(() => {
-      const token = localStorage.getItem("df_token");
-      if (token && !user) handleStorage();
-      if (!token && user) setUser(null);
-    }, 500);
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      clearInterval(id);
-    };
-  }, [user]);
-
+  // `user` is owned by App (routes/AppRoutes.jsx) and passed down as a prop —
+  // Navbar used to independently fetch/cache its own copy via apiGetMe, which
+  // could drift out of sync with App's copy (e.g. logout in one place not
+  // reflected in the other). Single source of truth now lives in App.
   const handleLogout = () => {
-    localStorage.removeItem("df_token");
-    localStorage.removeItem("df_user");
-    setUser(null);
     setDropdownOpen(false);
     if (onLogout) onLogout();
   };
@@ -765,17 +634,33 @@ export default function Navbar({
         aria-hidden={chromeHidden}
       >
         <div className="chrome-collapse-inner">
-          <div className="bg-[#2A2438] text-white text-[11px] sm:text-[12px]">
+          <div className="bg-black text-white text-[11px] sm:text-[12px]">
             <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2 flex items-center justify-between gap-3">
-              <p className="font-medium tracking-wide">
-                FREE shipping on orders over ₹999!
-              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Previous announcement"
+                  className="text-white/70 hover:text-white transition-colors"
+                >
+                  <ChevronLeftIcon />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next announcement"
+                  className="text-white/70 hover:text-white transition-colors"
+                >
+                  <ChevronRightIcon />
+                </button>
+                <p className="font-medium tracking-wide">
+                  FREE shipping on orders over ₹999!
+                </p>
+              </div>
               <div className="hidden sm:flex items-center gap-5 text-white/85">
                 <button
                   type="button"
                   className="hover:text-white transition-colors"
                 >
-                  For Business
+                  Dry Catch For Business
                 </button>
                 <button
                   type="button"
@@ -821,23 +706,10 @@ export default function Navbar({
               <Logo />
             </button>
 
-            <div className="flex-1 relative max-w-xl lg:max-w-2xl">
-              <input
-                type="text"
-                value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-                placeholder="Search for a product"
-                className="w-full pl-4 pr-24 py-2.5 sm:py-3 rounded-full border border-gray-300 bg-white text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:border-gray-400"
-              />
-              <button
-                type="button"
-                className="hidden sm:block absolute right-1.5 top-1/2 -translate-y-1/2 bg-[#F4B740] hover:bg-[#e8a930] text-gray-900 text-sm font-bold px-5 py-2 rounded-full transition-colors"
-              >
-                Search
-              </button>
-            </div>
+            <SearchBar className="flex-1 max-w-xl lg:max-w-2xl" />
 
             <nav className="flex items-center gap-4 sm:gap-5 shrink-0">
+              {isLoggedIn && <NotificationBell onNavigate={onNavigate} />}
               {isLoggedIn ? (
                 <div className="relative">
                   <button
@@ -1002,11 +874,13 @@ export default function Navbar({
 
       {cartOpen && (
         <CartDrawer
-          cart={cart}
+          items={cartItems}
+          summary={cartSummary}
           onInc={onCartInc}
           onDec={onCartDec}
           onRemove={onCartRemove}
           onClose={() => setCartOpen(false)}
+          onGoToCart={() => onNavigate("cart")}
         />
       )}
     </div>

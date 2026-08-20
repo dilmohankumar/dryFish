@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, lazy, Suspense } from "react";
 import Navbar from "../components/layout/Navbar/navbar.jsx";
 import Footer from "../components/layout/Footer/footer.jsx";
 import Home from "../pages/home.jsx";
@@ -6,14 +6,26 @@ import Shop from "../pages/shop.jsx";
 import CategoryPage from "../pages/category.jsx";
 import Sidebar from "../components/layout/sidebar/sidebar.jsx";
 import ProductDetail from "../pages/productDetails.jsx";
+import SearchResults from "../pages/searchResults.jsx";
 import Login from "../pages/auth/login.jsx";
 import Signup from "../pages/auth/signup.jsx";
 import Cart from "../pages/cart.jsx";
 import Checkout from "../pages/checkout.jsx";
 import Orders from "../pages/orders.jsx";
+import OrderDetail from "../pages/orderDetail.jsx";
 import Wishlist from "../pages/wishlist.jsx";
-import Profile from "../pages/profile.jsx";
-import { PRODUCTS } from "../pages/productGrid.jsx";
+import AccountRoute from "../pages/account/AccountRoute.jsx";
+import CmsPage from "../pages/CmsPage.jsx";
+// Phase 19 — the entire admin surface (CMS editors, notification/campaign
+// management, analytics dashboards + charts) is only ever visited by
+// admins, but was previously bundled statically into the same chunk every
+// customer downloads on first page load. Lazy-loading it means a normal
+// shopper's initial JS never includes any of that code — it's fetched
+// on-demand only when someone actually navigates to /admin.
+const AdminSection = lazy(() => import("../pages/admin/AdminSection.jsx"));
+import { productsAPI, cartAPI } from "../utils/api.js";
+import { normalizeProduct } from "../utils/productAdapters.js";
+import { cacheProducts } from "../utils/productCache.js";
 import {
   Navigate,
   Route,
@@ -21,9 +33,9 @@ import {
   useNavigate,
   useParams,
   useSearchParams,
-  useLocation,
 } from "react-router-dom";
 import { userAPI } from "../utils/api.js";
+import { setCurrentUser } from "../utils/authState.js";
 import { getMegaMenu } from "../data/megaMenu.js";
 
 // ── Path builders (pure — no hooks) ─────────────────────────────────────────
@@ -121,10 +133,41 @@ function CategoryRoute({ cart, onInc, onDec, onFirstAdd, onProductClick, onBackT
   );
 }
 
-function ProductDetailRoute({ cart, onCartInc, onCartDec, onCartFirstAdd }) {
+function ProductDetailRoute({ cart, onCartInc, onCartDec, onCartFirstAdd, user }) {
   const { id } = useParams();
   const navigate = useNavigate();
-  const product = PRODUCTS.find((p) => p.id === Number(id));
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    productsAPI
+      .getById(id)
+      .then((data) => {
+        if (cancelled) return;
+        const normalized = normalizeProduct(data.product);
+        cacheProducts([normalized]);
+        setProduct(normalized);
+      })
+      .catch(() => {
+        if (!cancelled) setProduct(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center py-24 text-gray-400 text-sm">
+        Loading product…
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1">
@@ -135,42 +178,112 @@ function ProductDetailRoute({ cart, onCartInc, onCartDec, onCartFirstAdd }) {
         onCartInc={onCartInc}
         onCartDec={onCartDec}
         onCartFirstAdd={onCartFirstAdd}
+        user={user}
       />
     </div>
   );
 }
 
 function CheckoutRoute() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const checkoutData = location.state;
 
-  // Direct/refresh visits to /checkout carry no cart snapshot — bounce to cart.
-  if (!checkoutData) return <Navigate to="/cart" replace />;
-
+  // The checkout page creates its own server-side session on mount (POST
+  // /checkout reads straight from the user's cart) — no cart snapshot needs
+  // to travel through router state anymore, so a direct/refresh visit works.
   return (
     <div className="flex-1">
-      <Checkout
-        cartItems={checkoutData.items}
-        total={checkoutData.total}
-        onBack={() => navigate("/cart")}
-      />
+      <Checkout onBack={() => navigate("/cart")} />
     </div>
   );
 }
 
-function StoreLayout({ user, onLogout, onLoginClick }) {
+function StoreLayout({ user, onLogout, onLoginClick, onUserUpdate }) {
   const [selectedSort, setSelectedSort] = useState(null);
   const [selectedCats, setSelectedCats] = useState([]);
   const [selectedOrigins, setSelectedOrigins] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [cart, setCart] = useState({});
+  // The cart itself — server-authoritative always (guests included: the
+  // backend tracks a guest cart via an httpOnly cookie, see cartService.js).
+  // `cart` here is the { [variantId]: quantity } view most existing UI
+  // (product cards, quick +/-) already expects; `cartItems`/`cartSummaryData`
+  // carry the richer server response for the drawer/cart page.
+  const [cartData, setCartData] = useState({ items: [], summary: { subtotal: 0, total: 0, currency: "INR" } });
   const navigate = useNavigate();
 
-  const cartInc = useCallback(id => setCart(c => ({ ...c, [id]: (c[id] || 0) + 1 })), []);
-  const cartDec = useCallback(id => setCart(c => { const n = (c[id] || 1) - 1; return n <= 0 ? { ...c, [id]: 0 } : { ...c, [id]: n }; }), []);
-  const cartFirstAdd = useCallback(id => setCart(c => ({ ...c, [id]: 1 })), []);
-  const cartRemove = useCallback(id => setCart(c => ({ ...c, [id]: 0 })), []);
+  const refreshCart = useCallback(async () => {
+    try {
+      const { data } = await cartAPI.get();
+      setCartData(data);
+    } catch {
+      // No cart yet / request failed — leave the previous (or empty) state.
+    }
+  }, []);
+
+  // Refetch whenever the logged-in identity changes — this is also what
+  // picks up the server-side guest→user cart merge that happens on login.
+  useEffect(() => {
+    refreshCart();
+  }, [user, refreshCart]);
+
+  const findItemByVariant = useCallback(
+    (variantId) => cartData.items.find((i) => String(i.variantId) === String(variantId)),
+    [cartData]
+  );
+
+  const cart = useMemo(() => {
+    const map = {};
+    for (const item of cartData.items) map[String(item.variantId)] = item.quantity;
+    return map;
+  }, [cartData]);
+
+  // Every handler below takes a variantId (Phase 6: cart lines reference
+  // variants, not products) and always reconciles with the server's response
+  // — the server is authoritative for quantity/price/availability, so the
+  // UI never assumes a request will succeed before it actually has.
+  const cartInc = useCallback(
+    async (variantId) => {
+      if (!variantId) return;
+      try {
+        const existing = findItemByVariant(variantId);
+        const { data } = existing
+          ? await cartAPI.setItemQuantity(existing.id, existing.quantity + 1)
+          : await cartAPI.addItem(variantId, 1);
+        setCartData(data);
+      } catch (err) {
+        alert(err.message || "Unable to update your cart. Please try again.");
+      }
+    },
+    [findItemByVariant]
+  );
+  const cartDec = useCallback(
+    async (variantId) => {
+      const existing = findItemByVariant(variantId);
+      if (!existing) return;
+      try {
+        const { data } = existing.quantity <= 1
+          ? await cartAPI.removeItem(existing.id)
+          : await cartAPI.setItemQuantity(existing.id, existing.quantity - 1);
+        setCartData(data);
+      } catch (err) {
+        alert(err.message || "Unable to update your cart. Please try again.");
+      }
+    },
+    [findItemByVariant]
+  );
+  const cartFirstAdd = cartInc; // same operation — add 1 to a (possibly nonexistent) line
+  const cartRemove = useCallback(
+    async (variantId) => {
+      const existing = findItemByVariant(variantId);
+      if (!existing) return;
+      try {
+        const { data } = await cartAPI.removeItem(existing.id);
+        setCartData(data);
+      } catch (err) {
+        alert(err.message || "Unable to update your cart. Please try again.");
+      }
+    },
+    [findItemByVariant]
+  );
   const clearFilters = () => { setSelectedSort(null); setSelectedCats([]); setSelectedOrigins([]); };
 
   // ── Navigation helpers ──────────────────────────────────────────────────
@@ -190,13 +303,15 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
     // Fallback for older callers that only pass a filter string/object
     goShop(cat?.filter || "All");
   };
-  const handleCheckout = (items, total) => navigate("/checkout", { state: { items, total } });
+  const handleCheckout = () => navigate("/checkout");
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
       <Navbar
         onOpenSidebar={() => setSidebarOpen(true)}
         cart={cart}
+        cartItems={cartData.items}
+        cartSummary={cartData.summary}
         onCartInc={cartInc}
         onCartDec={cartDec}
         onCartRemove={cartRemove}
@@ -254,14 +369,40 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
           element={
             <ProductDetailRoute
               cart={cart} onCartInc={cartInc} onCartDec={cartDec} onCartFirstAdd={cartFirstAdd}
+              user={user}
             />
           }
         />
-        <Route path="/cart" element={<div className="flex-1"><Cart onCheckout={handleCheckout} /></div>} />
+        <Route path="/search" element={<div className="flex-1"><SearchResults /></div>} />
+        <Route path="/cart" element={<div className="flex-1"><Cart onCheckout={handleCheckout} onContinueShopping={goShop} onCartChange={refreshCart} /></div>} />
         <Route path="/checkout" element={<CheckoutRoute />} />
         <Route path="/orders" element={<div className="flex-1"><Orders /></div>} />
+        <Route path="/orders/:id" element={<div className="flex-1"><OrderDetail /></div>} />
         <Route path="/wishlist" element={<div className="flex-1"><Wishlist /></div>} />
-        <Route path="/profile" element={<div className="flex-1"><Profile /></div>} />
+        <Route path="/profile" element={<Navigate to="/account" replace />} />
+        {/*
+          CMS static pages (Phase 15) live under /pages/:slug rather than a
+          bare /:slug. Namespacing is the safer choice here even though
+          react-router v6 ranks static routes above dynamic ones (so a bare
+          /:slug wouldn't actually break /shop, /cart, /checkout, etc. today):
+          a bare /:slug would silently swallow every future single-segment
+          route this app adds (e.g. a hypothetical /about or /blog moved to
+          a static component later) and there's no way to tell, just from
+          the URL, whether a given single-segment path is CMS content or a
+          real app route. /pages/:slug makes that unambiguous at the cost of
+          a slightly longer URL for CMS pages.
+        */}
+        <Route path="/pages/:slug" element={<CmsPage />} />
+        <Route
+          path="/account/*"
+          element={
+            user ? (
+              <AccountRoute user={user} onUserUpdate={onUserUpdate} onAccountDeactivated={onLogout} />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
@@ -271,31 +412,36 @@ function StoreLayout({ user, onLogout, onLoginClick }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+
+  // Keep the shared authState mirror (utils/authState.js) in sync with the
+  // real `user` state — App remains the single source of truth.
+  const setUser = (u) => {
+    setUserState(u);
+    setCurrentUser(u);
+  };
 
   useEffect(() => {
     checkUserSession();
   }, []);
 
   const checkUserSession = async () => {
-    const token = localStorage.getItem("df_token");
-    if (token) {
-      try {
-        const userData = await userAPI.getMe();
-        setUser(userData.data || userData.user);
-      } catch (err) {
-        localStorage.removeItem("df_token");
-        localStorage.removeItem("df_refreshToken");
-      }
+    // No token to check client-side anymore — the httpOnly cookie (if any)
+    // rides along automatically; a 401 here just means "not logged in".
+    try {
+      const userData = await userAPI.getMe();
+      setUser(userData.data || userData.user);
+    } catch {
+      setUser(null);
     }
     setLoading(false);
   };
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
-    navigate("/", { replace: true });
+    navigate(userData?.role === "admin" ? "/admin" : "/", { replace: true });
   };
 
   const handleSignupSuccess = (userData) => {
@@ -303,10 +449,13 @@ export default function App() {
     navigate("/", { replace: true });
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await userAPI.logout();
+    } catch {
+      // Cookie may already be gone/expired — proceed with client-side logout regardless.
+    }
     setUser(null);
-    localStorage.removeItem("df_token");
-    localStorage.removeItem("df_refreshToken");
     navigate("/login", { replace: true });
   };
 
@@ -332,12 +481,22 @@ export default function App() {
       />
 
       <Route
+        path="/admin/*"
+        element={
+          <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">Loading admin…</div>}>
+            <AdminSection user={user} onLogout={handleLogout} />
+          </Suspense>
+        }
+      />
+
+      <Route
         path="/*"
         element={
           <StoreLayout
             user={user}
             onLogout={handleLogout}
             onLoginClick={() => navigate("/login")}
+            onUserUpdate={setUser}
           />
         }
       />

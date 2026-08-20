@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { apiLogin, apiForgetPassword } from "../../utils/auth";
+import { authAPI } from "../../utils/api.js";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const EyeIcon = () => (
@@ -107,17 +107,9 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
       };
       console.log("📤 Login request:", { ...payload, password: "***" });
       
-      const data = await apiLogin(payload);
+      // Tokens are set by the server as httpOnly cookies — nothing to store here.
+      const data = await authAPI.login(payload);
       console.log("✅ Login success:", data);
-
-      if (!data.token) {
-        throw new Error("Server did not return a token");
-      }
-      
-      localStorage.setItem("df_token", data.token);
-      if (data.refreshToken) {
-        localStorage.setItem("df_refreshToken", data.refreshToken);
-      }
       setStatus("success");
       setTimeout(() => onLoginSuccess(data.user || { email: form.email }), 700);
     } catch (err) {
@@ -133,7 +125,7 @@ export default function Login({ onLoginSuccess, onGoToSignup }) {
     if (validate.email(form.email)) { setTouched(t => ({ ...t, email: true })); return; }
     setForgotState("sending");
     try {
-      await apiForgetPassword({ email: form.email });
+      await authAPI.requestPasswordReset({ email: form.email });
       setForgotState("sent");
     } catch (err) {
       setForgotState("error");

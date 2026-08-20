@@ -16,6 +16,9 @@ export default function PromoGrid({ onShopNow }) {
           <img
             src={dryPrawns}
             alt=""
+            loading="eager"
+            fetchPriority="high"
+            decoding="sync"
             className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-[#7B7CD4]/90 via-[#9B9CE8]/55 to-transparent" />

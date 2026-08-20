@@ -1,5 +1,13 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { openRazorpay } from "../hooks/useRazorpay.js";
+import { variantsAPI, growthAPI } from "../utils/api.js";
+import { trackProductView, trackAddToCart } from "../utils/analyticsClient.js";
+import { useSEO } from "../hooks/useSEO.js";
+import StockBadge from "../components/StockBadge.jsx";
+import ProductReviews from "../components/reviews/ProductReviews.jsx";
+import ProductRecommendations from "../components/growth/ProductRecommendations.jsx";
+import StockAlertButton from "../components/growth/StockAlertButton.jsx";
 import bombayDuckImage from "../assets/bombay-duck.jpg";
 import dryPrawnsImage from "../assets/Dry-Prawns.jpg";
 
@@ -109,12 +117,12 @@ const getProductImage = (productName) => {
 
 // ── ProductDetail ──────────────────────────────────────────────────────────
 // Props:
-//   product          — full product object from ProductGrid PRODUCTS array
+//   product          — full normalized product object (from productsAPI)
 //   onBack           — () => void  — back to home
 //   cart             — { [productId]: qty }  — global cart from App
-//   onCartInc        — (id) => void
-//   onCartDec        — (id) => void
-//   onCartFirstAdd   — (id) => void
+//   onCartInc        — (variantId) => void
+//   onCartDec        — (variantId) => void
+//   onCartFirstAdd   — (variantId) => void
 export default function ProductDetail({
   product,
   onBack,
@@ -122,11 +130,104 @@ export default function ProductDetail({
   onCartInc,
   onCartDec,
   onCartFirstAdd,
+  user,
 }) {
   const [slide, setSlide]                   = useState(0);
-  const [selectedVariant, setSelectedVariant] = useState(0);
+  const [realVariants, setRealVariants]     = useState(null); // null = still loading
+  const [selectedVariantId, setSelectedVariantId] = useState(null);
+  const [availabilityById, setAvailabilityById] = useState({}); // { [variantId]: {available, status} }
   const [buyStatus, setBuyStatus]           = useState("idle"); // idle | paying | success | failed
   const [toast, setToast]                   = useState(null);
+  const navigate = useNavigate();
+
+  // Phase 17 — one PRODUCT_VIEW per page mount, not per re-render.
+  // Phase 24 — same trigger records into the recently-viewed rail; a
+  // separate call (not folded into trackProductView) because it's a
+  // distinct feature with its own storage/read path, not an analytics event.
+  useEffect(() => {
+    if (product?.id) {
+      trackProductView(product.id);
+      growthAPI.recordView(product.id);
+    }
+  }, [product?.id]);
+
+  // Phase 23 — Product + Breadcrumb structured data, title/description/
+  // canonical/OG. Built from data already fetched for rendering — no
+  // extra request just for SEO metadata.
+  useSEO({
+    title: product?.seo?.title || (product ? `${product.name}${product.category ? ` | ${product.category}` : ""} | DryCatch` : undefined),
+    description: product?.seo?.description || product?.shortDescription || product?.description,
+    canonical: product?.slug ? `/products/${product.slug}` : undefined,
+    ogImage: product?.image,
+    ogType: "product",
+    jsonLd: product
+      ? [
+          {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            name: product.name,
+            description: product.shortDescription || product.description,
+            image: product.image ? [product.image] : undefined,
+            brand: { "@type": "Brand", name: "DryCatch" },
+            offers: {
+              "@type": "Offer",
+              url: `${window.location.origin}/products/${product.slug || product.id}`,
+              priceCurrency: "INR",
+              price: String(product.variants?.[0]?.price ?? product.price ?? ""),
+              availability: product.variants?.[0]?.available !== false ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+            },
+            ...(product.reviews > 0 && product.rating > 0
+              ? { aggregateRating: { "@type": "AggregateRating", ratingValue: String(product.rating), reviewCount: String(product.reviews) } }
+              : {}),
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              { "@type": "ListItem", position: 1, name: "Home", item: window.location.origin },
+              ...(product.category ? [{ "@type": "ListItem", position: 2, name: product.category, item: `${window.location.origin}/shop` }] : []),
+              { "@type": "ListItem", position: (product.category ? 3 : 2), name: product.name, item: `${window.location.origin}/products/${product.slug || product.id}` },
+            ],
+          },
+        ]
+      : undefined,
+  });
+
+  // Real variants live in their own collection now (see Phase 4) — fetched
+  // separately from the product itself, per the Product→Variant boundary.
+  useEffect(() => {
+    if (!product?.id) return;
+    let cancelled = false;
+    variantsAPI
+      .getAll(product.id)
+      .then(({ variants }) => {
+        if (cancelled) return;
+        setRealVariants(variants || []);
+        const initial = variants?.find((v) => v.isDefault) || variants?.[0];
+        setSelectedVariantId(initial?.id ?? null);
+
+        // A product detail page has a handful of variants at most, not a
+        // grid of cards — fetching each one's availability here doesn't
+        // create the N+1 problem a listing page would (see docs/inventory.md).
+        Promise.all(
+          (variants || []).map((v) =>
+            variantsAPI
+              .getAvailability(product.id, v.id)
+              .then((a) => [v.id, a])
+              .catch(() => [v.id, null])
+          )
+        ).then((pairs) => {
+          if (cancelled) return;
+          setAvailabilityById(Object.fromEntries(pairs.filter(([, a]) => a)));
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setRealVariants([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [product?.id]);
 
   // Guard against missing product prop
   if (!product) {
@@ -140,17 +241,38 @@ export default function ProductDetail({
     );
   }
 
-  // Get variants from product, default to empty array
-  const variants = product.variants || [];
-  const variant  = variants[selectedVariant] || (variants.length > 0 ? variants[0] : { price: 0, label: "", mrp: 0 });
+  // Prefer real variants (from the ProductVariant API); while they're
+  // loading (or if a product genuinely has none), fall back to the
+  // synthetic single-entry array productAdapters builds from base price.
+  const variants = (realVariants && realVariants.length > 0) ? realVariants : (product.variants || []);
+  const variantLabel = (v) => v?.weight?.label || v?.label || "";
+  // A variant option is selectable only if it's an active/listed variant AND
+  // inventory says it's actually in stock — availabilityById is empty for
+  // the synthetic fallback (no real variant id to look up), so those always
+  // pass through as available rather than being blocked by a missing entry.
+  const isVariantAvailable = (v) => {
+    const id = v.id ?? v._id;
+    const isActiveVariant = v.status === undefined || v.status === "active";
+    const stock = availabilityById[id];
+    return isActiveVariant && (!stock || stock.available);
+  };
+  const variant =
+    variants.find((v) => (v.id ?? v._id) === selectedVariantId) ||
+    variants.find(isVariantAvailable) ||
+    variants[0] ||
+    { price: 0, mrp: 0 };
+  const selectedAvailability = availabilityById[variant.id ?? variant._id];
+  const isOutOfStock = selectedAvailability?.available === false;
   // slides array from product, default to empty array
   const slides = product.slides || [];
   
   // Get the appropriate image for this product
   const productImage = getProductImage(product.name);
   
-  // qty in global cart for this product
-  const qty      = cart[product.id] || 0;
+  // Cart lines reference the VARIANT, not the product (Phase 6) — qty must
+  // be looked up by the selected variant's id, not product.id.
+  const variantId = variant?.id ?? variant?._id;
+  const qty      = cart[variantId] || 0;
   const total    = variant.price * (qty || 1);
   const isPaying  = buyStatus === "paying";
   const isSuccess = buyStatus === "success";
@@ -160,15 +282,16 @@ export default function ProductDetail({
     setTimeout(() => setToast(null), 5000);
   };
 
-  // ── Add to cart (syncs to global App cart) ─────────────────────────────
+  // ── Add to cart (syncs to the server cart via App) ─────────────────────
   const handleFirstAdd = () => {
-    if (onCartFirstAdd) onCartFirstAdd(product.id);
+    if (onCartFirstAdd) onCartFirstAdd(variantId);
+    trackAddToCart(product?.id, 1);
   };
   const handleInc = () => {
-    if (onCartInc) onCartInc(product.id);
+    if (onCartInc) onCartInc(variantId);
   };
   const handleDec = () => {
-    if (onCartDec) onCartDec(product.id);
+    if (onCartDec) onCartDec(variantId);
   };
 
   // ── Buy now via Razorpay ───────────────────────────────────────────────
@@ -178,7 +301,7 @@ export default function ProductDetail({
     try {
       await openRazorpay({
         product,
-        variant,
+        variant: { ...variant, label: variantLabel(variant) },
         qty: qty > 0 ? qty : 1,
         onSuccess: (paymentId) => {
           setBuyStatus("success");
@@ -324,22 +447,37 @@ export default function ProductDetail({
           {variants.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Select Weight</p>
-              <div className="flex flex-wrap gap-2">
-                {variants.map((v, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedVariant(i)}
-                    className={`flex items-center gap-2 border rounded-xl px-3 sm:px-4 py-2 text-sm font-medium transition-all ${
-                      selectedVariant === i
-                        ? "border-[#1A3A5C] bg-[#1A3A5C] text-white"
-                        : "border-gray-200 text-gray-700 hover:border-[#1A3A5C]"
-                    }`}
-                  >
-                    <span>{v.label}</span>
-                    <span className={selectedVariant === i ? "text-white/70" : "text-gray-400"}>— ₹{v.price}</span>
-                    {selectedVariant === i && <span className="ml-1 bg-white/20 rounded-full p-0.5"><CheckIcon /></span>}
-                  </button>
-                ))}
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Select weight">
+                {variants.map((v) => {
+                  const id = v.id ?? v._id ?? v.label;
+                  const isSelected = id === selectedVariantId || (!selectedVariantId && v === variant);
+                  const available = isVariantAvailable(v);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      disabled={!available}
+                      onClick={() => available && setSelectedVariantId(id)}
+                      className={`flex items-center gap-2 border rounded-xl px-3 sm:px-4 py-2 text-sm font-medium transition-all ${
+                        !available
+                          ? "border-gray-100 text-gray-300 cursor-not-allowed line-through"
+                          : isSelected
+                          ? "border-[#1A3A5C] bg-[#1A3A5C] text-white"
+                          : "border-gray-200 text-gray-700 hover:border-[#1A3A5C]"
+                      }`}
+                    >
+                      <span>{variantLabel(v)}</span>
+                      {available ? (
+                        <span className={isSelected ? "text-white/70" : "text-gray-400"}>— ₹{v.price}</span>
+                      ) : (
+                        <span className="text-gray-300">Unavailable</span>
+                      )}
+                      {isSelected && available && <span className="ml-1 bg-white/20 rounded-full p-0.5"><CheckIcon /></span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -351,6 +489,7 @@ export default function ProductDetail({
             <span className="text-sm font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
               {discountPct(variant.price, variant.mrp)}% OFF
             </span>
+            {selectedAvailability && <StockBadge status={selectedAvailability.status} />}
             {qty > 0 && (
               <span className="text-sm font-bold text-[#1A3A5C] bg-[#EAF1FA] px-2 py-0.5 rounded-full">
                 {qty} in cart · ₹{variant.price * qty}
@@ -360,7 +499,17 @@ export default function ProductDetail({
 
           {/* ── Add to cart row ── */}
           <div className="flex flex-col gap-3">
-            {qty === 0 ? (
+            {isOutOfStock ? (
+              <>
+                <button
+                  disabled
+                  className="w-full py-3.5 rounded-2xl font-bold text-base sm:text-lg border-2 border-gray-200 text-gray-400 cursor-not-allowed"
+                >
+                  Out of Stock
+                </button>
+                <StockAlertButton productId={product.id} variantId={variantId} user={user} onToast={showToast} />
+              </>
+            ) : qty === 0 ? (
               /* First add */
               <button
                 onClick={handleFirstAdd}
@@ -396,9 +545,11 @@ export default function ProductDetail({
             {/* ── Buy Now button ── always visible, amount reflects qty ── */}
             <button
               onClick={handleBuy}
-              disabled={isPaying}
+              disabled={isPaying || isOutOfStock}
               className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold text-base sm:text-lg transition-all active:scale-[0.98] shadow-md
-                ${isSuccess
+                ${isOutOfStock
+                  ? "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none"
+                  : isSuccess
                   ? "bg-green-500 text-white"
                   : isPaying
                   ? "bg-[#1A3A5C]/60 text-white cursor-not-allowed"
@@ -518,9 +669,24 @@ export default function ProductDetail({
           </div>
         </section>
 
+        {/* Reviews & Ratings */}
+        <section>
+          <ProductReviews productId={product.id} user={user} />
+        </section>
+
+        {/* Recommendations (Phase 24) */}
+        <ProductRecommendations
+          productId={product.id}
+          onSelectProduct={(p) => navigate(`/product/${p.slug || p._id}`)}
+        />
+
         {/* Sticky bottom CTA on mobile */}
         <div className="fixed bottom-0 left-0 right-0 md:hidden bg-white border-t border-gray-100 px-4 py-3 flex gap-3 z-30 shadow-lg">
-          {qty === 0 ? (
+          {isOutOfStock ? (
+            <button disabled className="flex-1 py-3 rounded-2xl font-bold text-sm border-2 border-gray-200 text-gray-400 cursor-not-allowed">
+              Out of Stock
+            </button>
+          ) : qty === 0 ? (
             <button
               onClick={handleFirstAdd}
               className="flex-1 py-3 rounded-2xl font-bold text-sm border-2 border-[#1A3A5C] text-[#1A3A5C] hover:bg-[#EAF1FA] transition-all"
@@ -536,9 +702,9 @@ export default function ProductDetail({
           )}
           <button
             onClick={handleBuy}
-            disabled={isPaying}
+            disabled={isPaying || isOutOfStock}
             className={`flex-1 flex items-center justify-center gap-1.5 py-3 rounded-2xl font-bold text-sm transition-all shadow
-              ${isSuccess ? "bg-green-500 text-white" : isPaying ? "bg-[#E07B39]/60 text-white cursor-not-allowed" : "bg-[#E07B39] text-white hover:bg-[#c96a2c]"}`}
+              ${isOutOfStock ? "bg-gray-200 text-gray-400 cursor-not-allowed shadow-none" : isSuccess ? "bg-green-500 text-white" : isPaying ? "bg-[#E07B39]/60 text-white cursor-not-allowed" : "bg-[#E07B39] text-white hover:bg-[#c96a2c]"}`}
           >
             {isPaying ? (
               <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Paying…</>

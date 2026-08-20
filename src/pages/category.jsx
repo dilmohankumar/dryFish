@@ -1,9 +1,12 @@
-import { PRODUCTS } from "./productGrid";
+import { useEffect, useState } from "react";
 import { getMegaMenu } from "../data/megaMenu";
+import { productsAPI, categoriesAPI } from "../utils/api";
+import { normalizeProducts, buildCategoryNameMap } from "../utils/productAdapters";
+import { cacheProducts } from "../utils/productCache";
+import { useSEO } from "../hooks/useSEO.js";
 
-// Proper rough category landing page — hero, sub-links from mega menu,
-// promo cards, and a filtered product grid. Ready to swap mock PRODUCTS
-// for API data later without changing the page structure.
+// Category landing page — hero, sub-links from mega menu, promo cards, and a
+// filtered product grid backed by the real product catalog API.
 export default function CategoryPage({
   slug,
   filter = "All",
@@ -21,7 +24,51 @@ export default function CategoryPage({
   const title = highlightLabel || menu?.label || "Shop";
   const description = menu?.description || "Browse our coastal Dry Catch collection.";
 
-  let products = PRODUCTS;
+  const [allProducts, setAllProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Phase 23 — category-page metadata. `tag`-filtered views of the same
+  // slug are non-canonical variants of the base category page (rule #29-31
+  // — one curated slug is the indexable page; a tag/filter narrowing of it
+  // isn't a separate page worth competing in search results).
+  useSEO({
+    title: `${title} | DryCatch`,
+    description,
+    canonical: slug ? `/category/${slug}` : undefined,
+    robots: tag ? "noindex,follow" : "index,follow",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const [categoriesRes, productsRes] = await Promise.all([
+          categoriesAPI.getAll().catch(() => ({ categories: [] })),
+          // This page still filters by the megaMenu's curated `filter` tag
+          // client-side (see the deliberate megaMenu-vs-Category note in
+          // Phase 3's audit) rather than the real ?category= slug filter, so
+          // it needs the (near-)full catalog rather than one server page.
+          productsAPI.getAll({ limit: 100 }),
+        ]);
+        if (cancelled) return;
+        const categoryNameById = buildCategoryNameMap(categoriesRes.categories || []);
+        const normalized = normalizeProducts(productsRes.data?.items || [], categoryNameById);
+        cacheProducts(normalized);
+        setAllProducts(normalized);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load products");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  let products = allProducts;
   if (filter && filter !== "All") {
     products = products.filter((p) => p.category === filter);
   }
@@ -30,9 +77,9 @@ export default function CategoryPage({
   }
 
   // If a tight filter emptied the grid, fall back to the category's products
-  // so the rough page never looks broken.
+  // so the page never looks broken.
   if (products.length === 0 && menu) {
-    products = PRODUCTS.filter((p) =>
+    products = allProducts.filter((p) =>
       menu.filter === "All" ? true : p.category === menu.filter
     );
   }
@@ -79,7 +126,7 @@ export default function CategoryPage({
             {description}
           </p>
           <p className="mt-4 text-xs sm:text-sm text-gray-400">
-            {products.length} product{products.length === 1 ? "" : "s"} · mock data for now
+            {products.length} product{products.length === 1 ? "" : "s"}
           </p>
         </div>
       </section>
@@ -171,11 +218,15 @@ export default function CategoryPage({
           <span className="text-xs sm:text-sm text-gray-400">{products.length} items</span>
         </div>
 
-        {products.length === 0 ? (
+        {loading ? (
+          <div className="text-center py-16 text-sm text-gray-400">Loading products…</div>
+        ) : error ? (
+          <div className="text-center py-16 text-sm text-red-500">{error}</div>
+        ) : products.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-10 text-center">
             <p className="font-display text-xl font-bold text-gray-800">Coming soon</p>
             <p className="text-sm text-gray-500 mt-2">
-              This rough page is ready — products will fill in when the catalog is connected.
+              No products in this category yet.
             </p>
             <button
               type="button"
@@ -188,7 +239,9 @@ export default function CategoryPage({
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
             {products.map((p) => {
-              const qty = cart[p.id] || 0;
+              // Cart lines reference a variant, not a product (Phase 6).
+              const cartKey = p.defaultVariantId || p.id;
+              const qty = cart[cartKey] || 0;
               const variant = p.variants?.[0] || { price: p.price, mrp: p.mrp, label: p.weight };
               return (
                 <div
@@ -217,16 +270,16 @@ export default function CategoryPage({
                       {qty === 0 ? (
                         <button
                           type="button"
-                          onClick={() => onFirstAdd(p.id)}
+                          onClick={() => onFirstAdd(cartKey)}
                           className="w-full bg-[#2C8C82] hover:bg-[#25746c] text-white text-xs font-bold py-2 rounded-full transition-colors"
                         >
                           Add to Cart
                         </button>
                       ) : (
                         <div className="flex items-center justify-between bg-[#2C8C82] text-white rounded-full px-3 py-1.5">
-                          <button type="button" onClick={() => onDec(p.id)} className="font-bold px-1">−</button>
+                          <button type="button" onClick={() => onDec(cartKey)} className="font-bold px-1">−</button>
                           <span className="text-xs font-bold">{qty}</span>
-                          <button type="button" onClick={() => onInc(p.id)} className="font-bold px-1">+</button>
+                          <button type="button" onClick={() => onInc(cartKey)} className="font-bold px-1">+</button>
                         </div>
                       )}
                     </div>

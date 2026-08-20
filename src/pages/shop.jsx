@@ -1,5 +1,8 @@
-import { useMemo, useState } from "react";
-import ProductGrid, { PRODUCTS } from "./productGrid";
+import { useEffect, useMemo, useState } from "react";
+import ProductGrid from "./productGrid";
+import { productsAPI, categoriesAPI } from "../utils/api";
+import { normalizeProducts, buildCategoryNameMap } from "../utils/productAdapters";
+import { cacheProducts } from "../utils/productCache";
 
 const ChevronDown = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -17,30 +20,22 @@ const BackIcon = () => (
   </svg>
 );
 
-const CATEGORIES = ["All", "Prawns", "Anchovies", "Sardines", "Mackerel", "Bombay Duck", "Tuna", "Squid", "Combo Packs"];
-const discountPct = (p, m) => Math.round(((m - p) / m) * 100);
-
-function applySortAndFilter(products, { selectedSort, selectedCats, selectedOrigins, activeCategory, search }) {
-  let list = [...products];
-  if (activeCategory && activeCategory !== "All") list = list.filter((p) => p.category === activeCategory);
-  if (selectedCats?.length) list = list.filter((p) => selectedCats.includes(p.category));
-  if (selectedOrigins?.length) list = list.filter((p) => selectedOrigins.includes(p.originType));
-  if (search?.trim()) {
-    const q = search.toLowerCase();
-    list = list.filter((p) => p.name.toLowerCase().includes(q) || p.desc?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q));
-  }
-  if (selectedSort === "Alphabetical") list.sort((a, b) => a.name.localeCompare(b.name));
-  if (selectedSort === "Price (Low to High)") list.sort((a, b) => a.price - b.price);
-  if (selectedSort === "Price (High to Low)") list.sort((a, b) => b.price - a.price);
-  if (selectedSort === "Discount (High to Low)") list.sort((a, b) => discountPct(b.price, b.mrp) - discountPct(a.price, a.mrp));
-  if (selectedSort === "Popularity") list.sort((a, b) => b.reviews - a.reviews);
-  return list;
-}
+// UI-facing sort labels never leak the backend's internal sort keys — see
+// the spec's "don't expose internal database field names" guidance.
+const SORT_TO_BACKEND = {
+  "Alphabetical": "name_asc",
+  "Price (Low to High)": "price_asc",
+  "Price (High to Low)": "price_desc",
+  "Discount (High to Low)": "discount_desc",
+  "Popularity": "popularity",
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shop — the full catalog page: search, category pills, sort/filter (via the
-// Sidebar rendered by StoreLayout) and the product grid. Reached from the
-// landing page's "Shop Now" / category / "View All" actions.
+// Sidebar rendered by StoreLayout) and the product grid. Filtering, sorting,
+// and pagination are all server-side (GET /products with whitelisted query
+// params) — this page no longer fetches the entire catalog to filter client-side.
+// Reached from the landing page's "Shop Now" / category / "View All" actions.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function Shop({
   selectedSort = null,
@@ -60,13 +55,67 @@ export default function Shop({
   // so `initialCategory` only needs to seed state once — no effect needed.
   const [activeCategory, setActiveCategory] = useState(initialCategory || "All");
   const [search, setSearch] = useState("");
+  const [categories, setCategories] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [pagination, setPagination] = useState(null);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState("");
 
-  const filtered = useMemo(
-    () => applySortAndFilter(PRODUCTS, { selectedSort, selectedCats, selectedOrigins, activeCategory, search }),
-    [selectedSort, selectedCats, selectedOrigins, activeCategory, search]
-  );
+  // Real categories, fetched once — replaces the old hardcoded pill/filter list.
+  useEffect(() => {
+    categoriesAPI.getAll().then(({ categories }) => setCategories(categories || [])).catch(() => setCategories([]));
+  }, []);
+
+  const categorySlugFilter = useMemo(() => {
+    const slugs = [];
+    if (activeCategory !== "All") slugs.push(activeCategory);
+    for (const slug of selectedCats) if (!slugs.includes(slug)) slugs.push(slug);
+    return slugs;
+  }, [activeCategory, selectedCats]);
+
+  // Reset to page 1 whenever any filter changes.
+  useEffect(() => setPage(1), [activeCategory, selectedCats, selectedOrigins, selectedSort, search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        page === 1 ? setLoading(true) : setLoadingMore(true);
+        const categoriesRes = await categoriesAPI.getAll().catch(() => ({ categories: [] }));
+        const categoryNameById = buildCategoryNameMap(categoriesRes.categories || []);
+
+        const { data } = await productsAPI.getAll({
+          category: categorySlugFilter,
+          origin: selectedOrigins,
+          sort: SORT_TO_BACKEND[selectedSort] || undefined,
+          search: search.trim() || undefined,
+          page,
+          limit: 20,
+        });
+        if (cancelled) return;
+        const normalized = normalizeProducts(data.items || [], categoryNameById);
+        cacheProducts(normalized);
+        setProducts((prev) => (page === 1 ? normalized : [...prev, ...normalized]));
+        setPagination(data.pagination);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Failed to load products");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categorySlugFilter, selectedOrigins, selectedSort, search, page]);
 
   const activeFilterCount = (selectedCats?.length || 0) + (selectedOrigins?.length || 0) + (selectedSort ? 1 : 0);
+  const activeCategoryName = categories.find((c) => c.slug === activeCategory)?.name;
 
   return (
     <div className="flex-1 min-w-0 w-full">
@@ -76,7 +125,15 @@ export default function Shop({
           <BackIcon /> Home
         </button>
         <span>›</span>
-        <span className="text-gray-700 font-medium">Shop</span>
+        <button onClick={() => setActiveCategory("All")} className="hover:text-gray-700 transition-colors">
+          Shop
+        </button>
+        {activeCategoryName && (
+          <>
+            <span>›</span>
+            <span className="text-gray-700 font-medium">{activeCategoryName}</span>
+          </>
+        )}
       </nav>
 
       {/* Top bar */}
@@ -122,19 +179,29 @@ export default function Shop({
         </div>
       </div>
 
-      {/* Category pills */}
+      {/* Category pills — real categories from the Category collection */}
       <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
-        {CATEGORIES.map((cat) => (
+        <button
+          onClick={() => setActiveCategory("All")}
+          className={`flex-shrink-0 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full border text-[10px] sm:text-sm font-medium transition-all ${
+            activeCategory === "All"
+              ? "bg-[#EAF1FA] border-[#1A3A5C] text-[#1A3A5C]"
+              : "bg-white border-gray-200 text-gray-600 hover:border-[#1A3A5C] hover:text-[#1A3A5C]"
+          }`}
+        >
+          All
+        </button>
+        {categories.map((cat) => (
           <button
-            key={cat}
-            onClick={() => setActiveCategory(cat)}
+            key={cat._id}
+            onClick={() => setActiveCategory(cat.slug)}
             className={`flex-shrink-0 px-2.5 sm:px-4 py-1 sm:py-1.5 rounded-full border text-[10px] sm:text-sm font-medium transition-all ${
-              activeCategory === cat
+              activeCategory === cat.slug
                 ? "bg-[#EAF1FA] border-[#1A3A5C] text-[#1A3A5C]"
                 : "bg-white border-gray-200 text-gray-600 hover:border-[#1A3A5C] hover:text-[#1A3A5C]"
             }`}
           >
-            {cat}
+            {cat.name}
           </button>
         ))}
       </div>
@@ -142,11 +209,11 @@ export default function Shop({
       {/* Result count */}
       <div className="flex items-center justify-between mb-3 flex-wrap gap-1">
         <p className="text-xs text-gray-400">
-          <span className="font-semibold text-gray-600">{filtered.length}</span> products
-          {activeCategory !== "All" && (
+          <span className="font-semibold text-gray-600">{pagination?.totalItems ?? products.length}</span> products
+          {activeCategoryName && (
             <>
               {" "}
-              · <span className="text-[#1A3A5C] font-semibold">{activeCategory}</span>
+              · <span className="text-[#1A3A5C] font-semibold">{activeCategoryName}</span>
             </>
           )}
           {search && (
@@ -158,9 +225,9 @@ export default function Shop({
         </p>
         <div className="flex flex-wrap gap-1">
           {selectedSort && <span className="text-[9px] bg-[#EAF1FA] text-[#1A3A5C] border border-[#1A3A5C]/20 rounded-full px-2 py-0.5 font-medium">{selectedSort}</span>}
-          {selectedCats?.map((c) => (
-            <span key={c} className="text-[9px] bg-[#EAF1FA] text-[#1A3A5C] border border-[#1A3A5C]/20 rounded-full px-2 py-0.5 font-medium">
-              {c}
+          {selectedCats?.map((slug) => (
+            <span key={slug} className="text-[9px] bg-[#EAF1FA] text-[#1A3A5C] border border-[#1A3A5C]/20 rounded-full px-2 py-0.5 font-medium">
+              {categories.find((c) => c.slug === slug)?.name || slug}
             </span>
           ))}
           {selectedOrigins?.map((o) => (
@@ -172,7 +239,13 @@ export default function Shop({
       </div>
 
       {/* Grid */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-16 text-sm text-gray-400">Loading products…</div>
+      ) : error ? (
+        <div className="text-center py-16 text-sm text-red-500">
+          Unable to load products. Please try again.
+        </div>
+      ) : products.length === 0 ? (
         <div className="text-center py-16">
           <div className="text-4xl mb-3">🔍</div>
           <p className="text-sm font-medium text-gray-600">No products found</p>
@@ -188,7 +261,20 @@ export default function Shop({
           </button>
         </div>
       ) : (
-        <ProductGrid products={filtered} cart={cart} onInc={onInc} onDec={onDec} onFirstAdd={onFirstAdd} onProductClick={onProductClick} />
+        <>
+          <ProductGrid products={products} cart={cart} onInc={onInc} onDec={onDec} onFirstAdd={onFirstAdd} onProductClick={onProductClick} />
+          {pagination?.hasNextPage && (
+            <div className="flex justify-center mt-6">
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={loadingMore}
+                className="px-6 py-2 rounded-full border border-[#1A3A5C] text-[#1A3A5C] text-sm font-semibold hover:bg-[#EAF1FA] disabled:opacity-50"
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

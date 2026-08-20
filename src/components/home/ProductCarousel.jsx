@@ -55,7 +55,7 @@ function CarouselCard({ product, qty, onInc, onDec, onFirstAdd, onCardClick }) {
       onClick={() => onCardClick(product)}
     >
       <div className="relative w-full h-[120px] sm:h-[160px] flex-shrink-0" style={{ background: product.bg || "#f5f5f5" }}>
-        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+        <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
         {product.bestseller && (
           <span className="absolute top-0 left-2 drop-shadow">
             <RibbonIcon />
@@ -175,17 +175,21 @@ export default function ProductCarousel({
       </div>
 
       <div ref={scrollerRef} className="flex gap-3 sm:gap-4 overflow-x-auto pb-2 -mx-1 px-1 snap-x scrollbar-hide">
-        {products.map((p) => (
-          <CarouselCard
-            key={p.id}
-            product={p}
-            qty={cart[p.id] || 0}
-            onInc={() => onInc(p.id)}
-            onDec={() => onDec(p.id)}
-            onFirstAdd={() => onFirstAdd(p.id)}
-            onCardClick={onProductClick}
-          />
-        ))}
+        {products.map((p) => {
+          // Cart lines reference a variant, not a product (Phase 6).
+          const cartKey = p.defaultVariantId || p.id;
+          return (
+            <CarouselCard
+              key={p.id}
+              product={p}
+              qty={cart[cartKey] || 0}
+              onInc={() => onInc(cartKey)}
+              onDec={() => onDec(cartKey)}
+              onFirstAdd={() => onFirstAdd(cartKey)}
+              onCardClick={onProductClick}
+            />
+          );
+        })}
       </div>
     </section>
   );

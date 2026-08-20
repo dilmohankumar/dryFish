@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { apiSignup, apiVerifyOTP } from "../../utils/auth";
+import { authAPI } from "../../utils/api.js";
 
 // ── Icons ──────────────────────────────────────────────────────────────────
 const EyeIcon = () => (<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>);
@@ -113,6 +113,10 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
   const [serverError, setServerError] = useState("");
   const [timer, setTimer] = useState(0);
   const [resends, setResends] = useState(0);
+  // Phase 24 — a referral code arrives as `?ref=CODE` on the shared signup
+  // link; captured once on mount (not re-read per render) and threaded
+  // through both the initial signup call and the resend-OTP retry.
+  const [referralCode] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
 
   const strength = getStrength(form.password);
 
@@ -152,9 +156,10 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
         phone: form.phone,
         password: form.password,
         confirmPassword: form.confirmPassword,
+        ...(referralCode ? { referralCode } : {}),
       };
       console.log("📤 Signup request:", { ...payload, password: "***", confirmPassword: "***" });
-      await apiSignup(payload);
+      await authAPI.signup(payload);
 
       setStatus("idle");
       setStep(1);
@@ -165,7 +170,7 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
       setServerError(err.message || "Signup failed. Please try again.");
       setTimeout(() => setStatus("idle"), 100);
     }
-  }, [form, step0Valid]);
+  }, [form, step0Valid, referralCode]);
 
   // ── Resend OTP ────────────────────────────────────────────────────────────
   const handleResend = async () => {
@@ -175,13 +180,14 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
     setForm(f => ({ ...f, otp: "" }));
     try {
       // Resend OTP by calling signup again (backend will detect user exists and send OTP)
-      await apiSignup({
+      await authAPI.signup({
         firstName: form.firstName,
         lastName: form.lastName,
         email: form.email,
         phone: form.phone,
         password: form.password,
         confirmPassword: form.confirmPassword,
+        ...(referralCode ? { referralCode } : {}),
       });
     } catch (err) {
       setServerError(err.message || "Failed to resend OTP");
@@ -198,10 +204,8 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
     setServerError("");
     try {
       // POST /api/auth/verify-otp  → { email, otp }
-      const data = await apiVerifyOTP({ email: form.email, otp: form.otp });
-
-      // Save token if backend returns it on verify
-      if (data.token) localStorage.setItem("df_token", data.token);
+      // Tokens are set by the server as httpOnly cookies — nothing to store here.
+      const data = await authAPI.verifyOtp({ email: form.email, otp: form.otp });
 
       setStatus("success");
       setStep(2);
@@ -234,6 +238,12 @@ export default function Signup({ onSignupSuccess, onGoToLogin }) {
           {/* ── Step 0: Details ── */}
           {step === 0 && (
             <form onSubmit={handleSubmitDetails} noValidate className="p-6 sm:p-8 flex flex-col gap-4">
+
+              {referralCode && (
+                <div className="bg-[#FFF4E6] border border-[#E07B39]/30 rounded-xl px-4 py-2.5 text-sm text-[#1A3A5C] font-medium text-center">
+                  🎁 You were referred with code <span className="font-bold">{referralCode}</span>
+                </div>
+              )}
 
               <button type="button" onClick={() => alert("Configure Google OAuth")}
                 className="flex items-center justify-center gap-3 w-full border border-gray-200 rounded-xl py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-all active:scale-[0.98]">

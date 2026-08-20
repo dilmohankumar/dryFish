@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { wishlistAPI, productsAPI, cartAPI } from "../utils/api";
+import { wishlistAPI, cartAPI, variantsAPI } from "../utils/api";
 
+// Backend shape: GET /wishlist → { wishlist: [<populated Product>, ...] }
 export default function WishlistPage() {
   const [items, setItems] = useState([]);
-  const [products, setProducts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -15,15 +15,7 @@ export default function WishlistPage() {
     try {
       setLoading(true);
       const data = await wishlistAPI.get();
-      setItems(data.items || []);
-
-      // Load product details
-      const prods = {};
-      for (const item of data.items || []) {
-        const prod = await productsAPI.getById(item.productId);
-        prods[item.productId] = prod;
-      }
-      setProducts(prods);
+      setItems(data.wishlist || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -33,8 +25,8 @@ export default function WishlistPage() {
 
   const removeFromWishlist = async (productId) => {
     try {
-      await wishlistAPI.remove(productId);
-      setItems(items.filter(item => item.productId !== productId));
+      const { wishlist } = await wishlistAPI.remove(productId);
+      setItems(wishlist);
     } catch (err) {
       setError(err.message);
     }
@@ -42,7 +34,16 @@ export default function WishlistPage() {
 
   const addToCart = async (productId) => {
     try {
-      await cartAPI.add(productId, 1);
+      // Cart lines reference a variant, not a product (Phase 6) — the
+      // wishlist doesn't carry a default variant id per item, so resolve it
+      // on click rather than fetching one per card on every render.
+      const { variants } = await variantsAPI.getAll(productId);
+      const defaultVariant = variants?.find((v) => v.isDefault) || variants?.[0];
+      if (!defaultVariant) {
+        setError("This product has no purchasable option right now.");
+        return;
+      }
+      await cartAPI.addItem(defaultVariant.id, 1);
       alert("Added to cart!");
     } catch (err) {
       setError(err.message);
@@ -81,18 +82,18 @@ export default function WishlistPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {items.map((item) => {
-          const product = products[item.productId];
+        {items.map((product) => {
           if (!product) return null;
+          const image = product.image || product.slides?.[0];
           return (
             <div
-              key={item.productId}
+              key={product._id}
               className="border rounded-lg overflow-hidden bg-white hover:shadow-md transition"
             >
-              {product.image && (
+              {image && (
                 <div className="aspect-square overflow-hidden bg-gray-100">
                   <img
-                    src={product.image}
+                    src={image}
                     alt={product.name}
                     className="w-full h-full object-cover"
                   />
@@ -105,13 +106,13 @@ export default function WishlistPage() {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => addToCart(item.productId)}
+                    onClick={() => addToCart(product._id)}
                     className="flex-1 px-3 py-2 bg-[#1A3A5C] text-white rounded text-sm hover:bg-[#142d47]"
                   >
                     Add to Cart
                   </button>
                   <button
-                    onClick={() => removeFromWishlist(item.productId)}
+                    onClick={() => removeFromWishlist(product._id)}
                     className="px-3 py-2 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
                   >
                     ✕

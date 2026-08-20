@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { categoriesAPI } from "../../../utils/api";
 
 const ChevronDown = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -22,11 +23,6 @@ const SORT_OPTIONS = [
   "Price (High to Low)",
   "Discount (High to Low)",
   "Popularity",
-];
-
-const CATEGORIES = [
-  "Prawns", "Anchovies", "Sardines", "Mackerel",
-  "Bombay Duck", "Tuna", "Squid", "Combo Packs",
 ];
 
 const ORIGINS = ["Locally Sourced", "Imported"];
@@ -58,10 +54,17 @@ export default function Sidebar({
   open = false,           // controls mobile drawer; on desktop always visible
   onClose = () => {},
 }) {
-  const toggleCat = (cat) =>
-    onCatChange(selectedCats.includes(cat)
-      ? selectedCats.filter(c => c !== cat)
-      : [...selectedCats, cat]);
+  const [categories, setCategories] = useState([]);
+
+  useEffect(() => {
+    categoriesAPI.getAll().then(({ categories }) => setCategories(categories || [])).catch(() => setCategories([]));
+  }, []);
+
+  // selectedCats holds category slugs (matches the backend's ?category= filter).
+  const toggleCat = (slug) =>
+    onCatChange(selectedCats.includes(slug)
+      ? selectedCats.filter(c => c !== slug)
+      : [...selectedCats, slug]);
 
   const toggleOrigin = (o) =>
     onOriginChange(selectedOrigins.includes(o)
@@ -140,21 +143,21 @@ export default function Sidebar({
 
           <Section title="Category">
             <ul className="space-y-2.5">
-              {CATEGORIES.map(cat => (
+              {categories.map(cat => (
                 <li
-                  key={cat}
+                  key={cat._id}
                   className="flex items-center gap-2.5 cursor-pointer"
-                  onClick={() => toggleCat(cat)}
+                  onClick={() => toggleCat(cat.slug)}
                 >
                   <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all
-                    ${selectedCats.includes(cat) ? "border-[#1A3A5C] bg-[#1A3A5C]" : "border-gray-300 hover:border-[#1A3A5C]"}`}>
-                    {selectedCats.includes(cat) && (
+                    ${selectedCats.includes(cat.slug) ? "border-[#1A3A5C] bg-[#1A3A5C]" : "border-gray-300 hover:border-[#1A3A5C]"}`}>
+                    {selectedCats.includes(cat.slug) && (
                       <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                       </svg>
                     )}
                   </div>
-                  <span className="text-sm text-gray-600">{cat}</span>
+                  <span className="text-sm text-gray-600">{cat.name}</span>
                 </li>
               ))}
             </ul>

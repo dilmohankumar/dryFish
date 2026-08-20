@@ -1,6 +1,7 @@
 
 
 import { toast } from "sonner";
+import { isLoggedIn, getCurrentUser } from "../utils/authState.js";
 
 const RAZORPAY_KEY =
   import.meta.env.VITE_RAZORPAY_KEY_ID || "rzp_test_XXXXXXXXXXXXXXXX";
@@ -25,9 +26,8 @@ export async function openRazorpay({
   onAuthRequired,    
   customDescription,
 }) {
-  // ── AUTH GUARD — check df_token ──
-  const token = localStorage.getItem("df_token");
-  if (!token) {
+  // ── AUTH GUARD ──
+  if (!isLoggedIn()) {
     // Not logged in → redirect to login
     toast.error("Please login to continue with payment");
     if (onAuthRequired) {
@@ -57,11 +57,8 @@ export async function openRazorpay({
   //   body: JSON.stringify({ amount: totalPaise, product_id: product.id, qty }),
   // }).then(r => r.json());
 
-  // Pre-fill from cached user
-  const cachedUser = (() => {
-    try { return JSON.parse(localStorage.getItem("df_user") || "{}"); }
-    catch { return {}; }
-  })();
+  // Pre-fill from the current user (owned by App, mirrored in authState.js)
+  const currentUser = getCurrentUser() || {};
 
   const options = {
     key: RAZORPAY_KEY,
@@ -73,9 +70,9 @@ export async function openRazorpay({
     // order_id,  // ← uncomment when backend is ready
 
     prefill: {
-      name:    cachedUser.name    || "",
-      email:   cachedUser.email   || "",
-      contact: cachedUser.phone   || "",
+      name:    [currentUser.firstName, currentUser.lastName].filter(Boolean).join(" "),
+      email:   currentUser.email   || "",
+      contact: currentUser.phone   || "",
     },
 
     notes: {
