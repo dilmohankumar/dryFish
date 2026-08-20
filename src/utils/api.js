@@ -4,13 +4,23 @@ const BASE = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1";
 // from JS) — `credentials: "include"` sends/receives them on every request,
 // there is no Authorization header to attach client-side anymore.
 async function rawRequest(path, options = {}) {
+  // `...options` must come BEFORE `headers`, not after — any caller that
+  // passes its own `options.headers` (e.g. checkoutAPI.placeOrder's
+  // Idempotency-Key) would otherwise have its headers object completely
+  // replace this one (object spread applies in order), silently dropping
+  // Content-Type. Without it, fetch sends a stringified-JSON body as
+  // `text/plain`, which Express's json() body-parser never parses —
+  // `req.body` ends up empty server-side with no error, no matter what
+  // the caller actually sent (this is exactly how a real bug shipped:
+  // POST /checkout/:id/place-order's `paymentMethod` silently reached the
+  // server as `undefined` every time an Idempotency-Key header was set).
   const res = await fetch(`${BASE}${path}`, {
     credentials: "include",
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...options.headers,
     },
-    ...options,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -180,11 +190,13 @@ export const checkoutAPI = {
   removeCoupon: (id) => request(`/checkout/${id}/coupon`, { method: "DELETE" }),
   // idempotencyKey: a UUID generated once per checkout attempt on the
   // client and re-sent unchanged on any retry of that same attempt.
-  placeOrder: (id, idempotencyKey) =>
+  // paymentMethod: "online" (default, opens Razorpay) or "cod" (backend
+  // confirms the order immediately, no gateway involved).
+  placeOrder: (id, idempotencyKey, paymentMethod = "online") =>
     request(`/checkout/${id}/place-order`, {
       method: "POST",
       headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ paymentMethod }),
     }),
 };
 

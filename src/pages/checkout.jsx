@@ -244,6 +244,7 @@ export default function CheckoutPage({ onBack }) {
   //   "pending"   — a few polls in and still not succeeded/failed — say so
   //   "succeeded" — confirmed by verify or payment-status
   //   "failed"    — confirmed failed/cancelled/expired — offer retry
+  const [paymentMethod, setPaymentMethod] = useState("online");
   const [paymentPhase, setPaymentPhase] = useState(null);
   const [paymentOrder, setPaymentOrder] = useState(null); // the order being paid for
   const [paymentError, setPaymentError] = useState("");
@@ -558,9 +559,18 @@ export default function CheckoutPage({ onBack }) {
     setError("");
     setProcessing(true);
     try {
-      const result = await checkoutAPI.placeOrder(checkout._id, idempotencyKeyRef.current);
+      const result = await checkoutAPI.placeOrder(checkout._id, idempotencyKeyRef.current, paymentMethod);
       const { order, razorpayOrderId, amount } = result;
       setProcessing(false);
+      if (paymentMethod === "cod") {
+        // No gateway involved — the backend already confirmed the order
+        // (see paymentService.confirmCodOrder). Reuses the exact same
+        // success screen a completed Razorpay payment lands on
+        // (gated on paymentPhase, not the address/review `step`).
+        setConfirmedOrder(order);
+        setPaymentPhase("succeeded");
+        return;
+      }
       await openRazorpayCheckout(order, razorpayOrderId, amount);
     } catch (err) {
       // REVALIDATION_FAILED (409) and CHECKOUT_IN_PROGRESS (409) both land
@@ -635,7 +645,11 @@ export default function CheckoutPage({ onBack }) {
         <div className="text-4xl mb-3">✅</div>
         <h1 className="text-2xl font-bold mb-2">Order placed!</h1>
         <p className="text-gray-600 mb-1">Order #{confirmedOrder._id}</p>
-        <p className="text-gray-600 mb-6">Total paid: {money(confirmedOrder.totalAmount)}</p>
+        <p className="text-gray-600 mb-6">
+          {paymentMethod === "cod"
+            ? `Amount due on delivery: ${money(confirmedOrder.totalAmount)}`
+            : `Total paid: ${money(confirmedOrder.totalAmount)}`}
+        </p>
         <div className="flex gap-4 justify-center">
           <button onClick={() => navigate("/orders")} className="px-6 py-2.5 bg-[#1A3A5C] text-white rounded-full font-semibold hover:bg-[#142d47]">
             View My Orders
@@ -910,6 +924,20 @@ export default function CheckoutPage({ onBack }) {
                 </div>
               </div>
 
+              <div className="bg-white border rounded-lg p-6">
+                <h2 className="text-xl font-bold mb-4">Payment Method</h2>
+                <div className="space-y-3">
+                  <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer ${paymentMethod === "online" ? "border-[#1A3A5C] bg-[#EAF1FA]" : "border-gray-200"}`}>
+                    <input type="radio" name="paymentMethod" checked={paymentMethod === "online"} onChange={() => setPaymentMethod("online")} className="w-4 h-4 accent-[#1A3A5C]" />
+                    <span className="font-medium">Pay Online (Card / UPI / Netbanking)</span>
+                  </label>
+                  <label className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer ${paymentMethod === "cod" ? "border-[#1A3A5C] bg-[#EAF1FA]" : "border-gray-200"}`}>
+                    <input type="radio" name="paymentMethod" checked={paymentMethod === "cod"} onChange={() => setPaymentMethod("cod")} className="w-4 h-4 accent-[#1A3A5C]" />
+                    <span className="font-medium">Cash on Delivery</span>
+                  </label>
+                </div>
+              </div>
+
               {validating && <p className="text-gray-400 text-sm">Checking prices and stock...</p>}
               {!validating && issues.length > 0 && <IssuesPanel issues={issues} />}
               {!validating && issues.length > 0 && (
@@ -932,7 +960,7 @@ export default function CheckoutPage({ onBack }) {
                   disabled={processing || validating || issues.length > 0}
                   className="flex-1 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                 >
-                  {processing ? "Processing..." : "Place Order & Pay"}
+                  {processing ? "Processing..." : paymentMethod === "cod" ? "Place Order (Cash on Delivery)" : "Place Order & Pay"}
                 </button>
               </div>
             </div>
