@@ -187,7 +187,7 @@ export default function AdminDashboardPage() {
                   <dt className="text-gray-500">Search Zero-Result Rate</dt>
                   <dd className="font-medium text-gray-800">
                     {data?.search?.zeroResultRate !== undefined
-                      ? `${(Number(data.search.zeroResultRate) * 100).toFixed(1)}%`
+                      ? `${Number(data.search.zeroResultRate).toFixed(1)}%`
                       : "—"}
                   </dd>
                 </div>
